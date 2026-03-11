@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { User } from '@/types';
 import { toast } from 'sonner';
-import { Users, Pencil, Trash2, X, Save, Eye, EyeOff, Search, Plus } from 'lucide-react';
+import { Users, Pencil, Trash2, X, Save, Eye, EyeOff, Search, Plus, Lock } from 'lucide-react';
 
 const AdminSettings = () => {
   const { users, updateUser, deleteUser, addUser, user: currentUser } = useAuth();
@@ -79,6 +79,11 @@ const AdminSettings = () => {
   const handleDelete = async (id: string) => {
     if (id === currentUser?.id) {
       toast.error('You cannot delete your own account');
+      return;
+    }
+    const userToDelete = users.find(u => u.id === id);
+    if (userToDelete?.isProtected) {
+      toast.error('This account is protected and cannot be deleted');
       return;
     }
     try {
@@ -285,20 +290,32 @@ const AdminSettings = () => {
                   <td className="px-4 py-3.5 text-muted-foreground">{u.company}</td>
                   <td className="px-4 py-3.5 text-muted-foreground whitespace-nowrap">{formatDate(u.registeredAt)}</td>
                   <td className="px-4 py-3.5">
-                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                      u.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-secondary text-secondary-foreground'
-                    }`}>
-                      {u.role === 'admin' ? 'Admin' : 'Customer'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                        u.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-secondary text-secondary-foreground'
+                      }`}>
+                        {u.role === 'admin' ? 'Admin' : 'Customer'}
+                      </span>
+                      {u.isProtected && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                          <Lock className="h-3 w-3" /> Protected
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1.5">
                       <button onClick={() => startEdit(u)} className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
-                      {u.id !== currentUser?.id && (
+                      {u.id !== currentUser?.id && !u.isProtected && (
                         <button onClick={() => setDeleteConfirm(u.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
                           <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {u.isProtected && (
+                        <button disabled className="rounded-lg p-2 text-muted-foreground cursor-not-allowed" title="This account is protected and cannot be deleted">
+                          <Lock className="h-3.5 w-3.5" />
                         </button>
                       )}
                     </div>
