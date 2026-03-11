@@ -88,7 +88,7 @@ const AdminSettings = () => {
       setAddForm({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' });
       // Sync users to ensure UI shows the newly added user
       syncUsers();
-      toast.success('User added successfully to Firebase and database');
+      toast.success('User added successfully');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to add user');
     }
@@ -109,7 +109,7 @@ const AdminSettings = () => {
       // Sync users immediately to refresh the list from localStorage
       syncUsers();
       setDeleteConfirm(null);
-      toast.success('User deleted successfully from Firebase and database');
+      toast.success('User deleted successfully');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to delete user');
     }
