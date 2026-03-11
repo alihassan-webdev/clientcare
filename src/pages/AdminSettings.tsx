@@ -12,7 +12,7 @@ const AdminSettings = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [showAddUser, setShowAddUser] = useState(false);
-  const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', company: '', password: '' });
+  const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' as const });
   const [showAddPassword, setShowAddPassword] = useState(false);
 
   const filteredUsers = users.filter(u => {
@@ -67,9 +67,9 @@ const AdminSettings = () => {
       return;
     }
     try {
-      await addUser(addForm.name, addForm.email, addForm.phone, addForm.company, addForm.password);
+      await addUser(addForm.name, addForm.email, addForm.phone, addForm.company, addForm.password, addForm.role);
       setShowAddUser(false);
-      setAddForm({ name: '', email: '', phone: '', company: '', password: '' });
+      setAddForm({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' });
       toast.success('User added successfully to Firebase and database');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to add user');
@@ -105,7 +105,7 @@ const AdminSettings = () => {
           <p className="mt-0.5 text-sm text-muted-foreground">Manage all registered users</p>
         </div>
         <button
-          onClick={() => { setShowAddUser(true); setAddForm({ name: '', email: '', phone: '', company: '', password: '' }); setShowAddPassword(false); }}
+          onClick={() => { setShowAddUser(true); setAddForm({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' }); setShowAddPassword(false); }}
           className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-all hover:opacity-90 hover:-translate-y-0.5 shadow-primary-glow"
         >
           <Plus className="h-4 w-4" /> Add User
@@ -142,6 +142,13 @@ const AdminSettings = () => {
                   <label className="mb-1.5 block text-sm font-medium text-card-foreground">Company</label>
                   <input type="text" value={addForm.company} onChange={e => setAddForm(p => ({ ...p, company: e.target.value }))} placeholder="Company Name" className={inputClasses} />
                 </div>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-card-foreground">Role</label>
+                <select value={addForm.role} onChange={e => setAddForm(p => ({ ...p, role: e.target.value as 'admin' | 'customer' }))} className={inputClasses}>
+                  <option value="customer">Customer</option>
+                  <option value="admin">Admin</option>
+                </select>
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-card-foreground">Password</label>

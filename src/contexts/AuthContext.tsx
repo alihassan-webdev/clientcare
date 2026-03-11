@@ -11,7 +11,7 @@ interface AuthContextType {
   isLoading: boolean;
   users: User[];
   login: (email: string, password: string) => Promise<void>;
-  addUser: (name: string, email: string, phone: string, company: string, password: string) => Promise<User>;
+  addUser: (name: string, email: string, phone: string, company: string, password: string, userRole?: UserRole) => Promise<User>;
   logout: () => void;
   updateProfile: (updates: Partial<User> & { password?: string }) => void;
   updateUser: (id: string, updates: Partial<User> & { password?: string }) => void;
@@ -93,14 +93,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [users]);
 
-  const addUser = useCallback(async (name: string, email: string, phone: string, company: string, password: string) => {
+  const addUser = useCallback(async (name: string, email: string, phone: string, company: string, password: string, userRole: UserRole = 'customer') => {
     try {
       // Create user in Firebase
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
 
       const newUser: User = {
         id: userCredential.user.uid,
-        name, email, phone, role: 'customer', company,
+        name, email, phone, role: userRole, company,
         password,
         registeredAt: new Date().toISOString(),
       };
