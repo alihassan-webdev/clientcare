@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { User } from '@/types';
 import { toast } from 'sonner';
-import { Users, Pencil, Trash2, X, Save, Eye, EyeOff, Search, Plus, Lock } from 'lucide-react';
+import { Users, Pencil, Trash2, X, Save, Eye, EyeOff, Search, Plus, Lock, RotateCw } from 'lucide-react';
 
 const AdminSettings = () => {
   const { users, updateUser, deleteUser, addUser, user: currentUser, syncUsers } = useAuth();
@@ -14,6 +14,7 @@ const AdminSettings = () => {
   const [showAddUser, setShowAddUser] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' as const });
   const [showAddPassword, setShowAddPassword] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Sync users from database on component mount
   useEffect(() => {
@@ -59,6 +60,8 @@ const AdminSettings = () => {
       }
 
       setEditingUser(null);
+      // Sync users to ensure UI shows the updated user
+      syncUsers();
       toast.success('User updated successfully');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to update user');
@@ -83,7 +86,9 @@ const AdminSettings = () => {
       await addUser(addForm.name, addForm.email, addForm.phone, addForm.company, addForm.password, addForm.role);
       setShowAddUser(false);
       setAddForm({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' });
-      toast.success('User added successfully to Firebase and database');
+      // Sync users to ensure UI shows the newly added user
+      syncUsers();
+      toast.success('User added successfully');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to add user');
     }
@@ -101,10 +106,24 @@ const AdminSettings = () => {
     }
     try {
       await deleteUser(id);
+      // Sync users immediately to refresh the list from localStorage
+      syncUsers();
       setDeleteConfirm(null);
-      toast.success('User deleted successfully from Firebase and database');
+      toast.success('User deleted successfully');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to delete user');
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      syncUsers();
+      toast.success('Users refreshed successfully');
+    } catch (error: any) {
+      toast.error('Failed to refresh users');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -282,10 +301,19 @@ const AdminSettings = () => {
 
       {/* Users Table */}
       <div className="card-premium overflow-hidden">
-        <div className="border-b border-border px-5 py-3.5">
+        <div className="border-b border-border px-5 py-3.5 flex items-center justify-between">
           <h3 className="flex items-center gap-2 font-heading text-sm font-semibold text-card-foreground">
             <Users className="h-4 w-4" /> All Users ({filteredUsers.length})
           </h3>
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Refresh users list"
+          >
+            <RotateCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -324,16 +352,20 @@ const AdminSettings = () => {
                   </td>
                   <td className="px-4 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => startEdit(u)} className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      {u.id !== currentUser?.id && !u.isProtected && (
-                        <button onClick={() => setDeleteConfirm(u.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                      {u.email !== 'ali.hassan@aviratechnologies.com' && (
+                        <>
+                          <button onClick={() => startEdit(u)} className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          {u.id !== currentUser?.id && !u.isProtected && (
+                            <button onClick={() => setDeleteConfirm(u.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </>
                       )}
-                      {u.isProtected && (
-                        <button disabled className="rounded-lg p-2 text-muted-foreground cursor-not-allowed" title="This account is protected and cannot be deleted">
+                      {(u.isProtected || u.email === 'ali.hassan@aviratechnologies.com') && (
+                        <button disabled className="rounded-lg p-2 text-muted-foreground cursor-not-allowed" title="This account is protected and cannot be modified">
                           <Lock className="h-3.5 w-3.5" />
                         </button>
                       )}

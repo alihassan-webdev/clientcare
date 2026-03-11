@@ -134,7 +134,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         password,
         registeredAt: new Date().toISOString(),
       };
-      setUsers(prev => [...prev, newUser]);
+      setUsers(prev => {
+        const updated = [...prev, newUser];
+        // Persist immediately to localStorage for seamless sync
+        localStorage.setItem('cc_users', JSON.stringify(updated));
+        return updated;
+      });
       return newUser;
     } catch (error: any) {
       const errorMessage = error?.code === 'auth/email-already-in-use'
@@ -176,7 +181,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Cannot change the role of a protected account');
     }
 
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
+    setUsers(prev => {
+      const updated = prev.map(u => u.id === id ? { ...u, ...updates } : u);
+      // Persist immediately to localStorage for seamless sync
+      localStorage.setItem('cc_users', JSON.stringify(updated));
+      return updated;
+    });
     if (user?.id === id) {
       // If role is being changed for current user, logout after a short delay
       if (updates.role && updates.role !== user.role) {
@@ -210,9 +220,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem('cc_user');
         setUser(null);
         setRole(null);
+      } else {
+        // For other users, call Cloud Function to delete from Firebase
+        // This requires a backend Cloud Function with Admin SDK access
+        try {
+          await fetch('/api/deleteUser', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: id })
+          }).then(res => {
+            if (!res.ok) throw new Error('Failed to delete user from Firebase');
+            return res.json();
+          });
+        } catch (firebaseError) {
+          // Log the error but continue with local deletion
+          // This allows the app to work even without a backend Cloud Function
+          console.warn('Could not delete user from Firebase Auth:', firebaseError);
+        }
       }
-      // Remove from local database
-      setUsers(prev => prev.filter(u => u.id !== id));
+
+      // Remove from local database and persist immediately
+      setUsers(prev => {
+        const updated = prev.filter(u => u.id !== id);
+        // Persist immediately to localStorage for seamless sync
+        localStorage.setItem('cc_users', JSON.stringify(updated));
+        return updated;
+      });
     } catch (error: any) {
       const errorMessage = error?.message || 'Failed to delete user';
       throw new Error(errorMessage);
@@ -225,9 +258,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (storedUsers) {
         const loadedUsers = JSON.parse(storedUsers);
         setUsers(loadedUsers);
+      } else {
+        // If no users in storage, use mock data and persist it
+        setUsers(mockUsers);
+        localStorage.setItem('cc_users', JSON.stringify(mockUsers));
       }
     } catch (error) {
       console.error('Failed to sync users from storage:', error);
+      // On error, fallback to mock data
+      setUsers(mockUsers);
     }
   }, []);
 
