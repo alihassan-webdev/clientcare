@@ -170,6 +170,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user?.id]);
 
   const updateUser = useCallback((id: string, updates: Partial<User> & { password?: string }) => {
+    // Check if trying to change role of protected user
+    const userToUpdate = users.find(u => u.id === id);
+    if (userToUpdate?.isProtected && updates.role && updates.role !== userToUpdate.role) {
+      throw new Error('Cannot change the role of a protected account');
+    }
+
     setUsers(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
     if (user?.id === id) {
       // If role is being changed for current user, logout after a short delay
@@ -185,10 +191,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return updated;
       });
     }
-  }, [user?.id, user?.role, logout]);
+  }, [user?.id, user?.role, logout, users]);
 
   const deleteUser = useCallback(async (id: string) => {
     try {
+      // Check if user is protected - cannot be deleted by anyone
+      const userToDelete = users.find(u => u.id === id);
+      if (userToDelete?.isProtected) {
+        throw new Error('This account is protected and cannot be deleted');
+      }
+
       // If deleting the current user
       if (user?.id === id && auth.currentUser) {
         await firebaseDeleteUser(auth.currentUser);
@@ -205,7 +217,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const errorMessage = error?.message || 'Failed to delete user';
       throw new Error(errorMessage);
     }
-  }, [user?.id]);
+  }, [user?.id, users]);
 
   const syncUsers = useCallback(() => {
     try {

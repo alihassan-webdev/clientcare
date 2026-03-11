@@ -42,19 +42,27 @@ const AdminSettings = () => {
       toast.error('Password must be at least 6 characters');
       return;
     }
+    if (editingUser.isProtected && editForm.role !== editingUser.role) {
+      toast.error('Cannot change the role of a protected account');
+      return;
+    }
     const updates: any = { name: editForm.name, email: editForm.email, phone: editForm.phone, company: editForm.company, role: editForm.role };
     if (editForm.password) updates.password = editForm.password;
-    updateUser(editingUser.id, updates);
+    try {
+      updateUser(editingUser.id, updates);
 
-    // If current user's role changed, show logout notification and trigger logout
-    if (currentUser?.id === editingUser.id && currentUser.role !== editForm.role) {
-      setTimeout(() => {
-        toast.info('Your role has been changed. Please log in again.');
-      }, 500);
+      // If current user's role changed, show logout notification and trigger logout
+      if (currentUser?.id === editingUser.id && currentUser.role !== editForm.role) {
+        setTimeout(() => {
+          toast.info('Your role has been changed. Please log in again.');
+        }, 500);
+      }
+
+      setEditingUser(null);
+      toast.success('User updated successfully');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to update user');
     }
-
-    setEditingUser(null);
-    toast.success('User updated successfully');
   };
 
   const handleAddUser = async () => {
@@ -212,8 +220,14 @@ const AdminSettings = () => {
                 </div>
               </div>
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-card-foreground">Role</label>
-                <select value={editForm.role} onChange={e => setEditForm(p => ({ ...p, role: e.target.value as 'admin' | 'customer' }))} className={inputClasses}>
+                <label className="mb-1.5 block text-sm font-medium text-card-foreground">Role {editingUser?.isProtected && <span className="text-amber-600">(Protected)</span>}</label>
+                <select
+                  value={editForm.role}
+                  onChange={e => setEditForm(p => ({ ...p, role: e.target.value as 'admin' | 'customer' }))}
+                  disabled={editingUser?.isProtected}
+                  className={`${inputClasses} ${editingUser?.isProtected ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  title={editingUser?.isProtected ? 'Cannot change role of protected account' : ''}
+                >
                   <option value="customer">Customer</option>
                   <option value="admin">Admin</option>
                 </select>
