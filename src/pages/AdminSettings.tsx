@@ -60,6 +60,8 @@ const AdminSettings = () => {
       }
 
       setEditingUser(null);
+      // Sync users to ensure UI shows the updated user
+      syncUsers();
       toast.success('User updated successfully');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to update user');
@@ -84,6 +86,8 @@ const AdminSettings = () => {
       await addUser(addForm.name, addForm.email, addForm.phone, addForm.company, addForm.password, addForm.role);
       setShowAddUser(false);
       setAddForm({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' });
+      // Sync users to ensure UI shows the newly added user
+      syncUsers();
       toast.success('User added successfully to Firebase and database');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to add user');
