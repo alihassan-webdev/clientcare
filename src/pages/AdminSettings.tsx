@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { User } from '@/types';
 import { toast } from 'sonner';
-import { Users, Pencil, Trash2, X, Save, Eye, EyeOff, Search, Plus, Lock } from 'lucide-react';
+import { Users, Pencil, Trash2, X, Save, Eye, EyeOff, Search, Plus, Lock, RotateCw } from 'lucide-react';
 
 const AdminSettings = () => {
   const { users, updateUser, deleteUser, addUser, user: currentUser, syncUsers } = useAuth();
@@ -14,6 +14,7 @@ const AdminSettings = () => {
   const [showAddUser, setShowAddUser] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' as const });
   const [showAddPassword, setShowAddPassword] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Sync users from database on component mount
   useEffect(() => {
@@ -107,6 +108,18 @@ const AdminSettings = () => {
       toast.success('User deleted successfully from Firebase and database');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to delete user');
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      syncUsers();
+      toast.success('Users refreshed successfully');
+    } catch (error: any) {
+      toast.error('Failed to refresh users');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -284,10 +297,19 @@ const AdminSettings = () => {
 
       {/* Users Table */}
       <div className="card-premium overflow-hidden">
-        <div className="border-b border-border px-5 py-3.5">
+        <div className="border-b border-border px-5 py-3.5 flex items-center justify-between">
           <h3 className="flex items-center gap-2 font-heading text-sm font-semibold text-card-foreground">
             <Users className="h-4 w-4" /> All Users ({filteredUsers.length})
           </h3>
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Refresh users list"
+          >
+            <RotateCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
