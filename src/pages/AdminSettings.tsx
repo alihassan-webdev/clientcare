@@ -16,10 +16,10 @@ const AdminSettings = () => {
   const [showAddPassword, setShowAddPassword] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Sync users from database on component mount
+  // Sync users from storage on component mount to get the latest data
   useEffect(() => {
     syncUsers();
-  }, [syncUsers]);
+  }, []);
 
   const filteredUsers = users.filter(u => {
     if (!search) return true;
