@@ -82,11 +82,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(userObj);
       setRole(userObj.role);
     } catch (error: any) {
-      const errorMessage = error?.code === 'auth/user-not-found'
-        ? 'Email not registered'
-        : error?.code === 'auth/wrong-password'
-        ? 'Invalid password'
-        : error?.message || 'Login failed';
+      let errorMessage = 'Login failed';
+
+      if (error?.code === 'auth/user-not-found') {
+        errorMessage = 'Email not registered';
+      } else if (error?.code === 'auth/wrong-password') {
+        errorMessage = 'Invalid password';
+      } else if (error?.code === 'auth/invalid-credential') {
+        errorMessage = 'Invalid email or password';
+      } else if (error?.code === 'auth/invalid-email') {
+        errorMessage = 'Please enter a valid email address';
+      } else if (error?.code === 'auth/user-disabled') {
+        errorMessage = 'This account has been disabled';
+      } else if (error?.code === 'auth/too-many-requests') {
+        errorMessage = 'Too many login attempts. Please try again later';
+      } else {
+        errorMessage = error?.message || 'Login failed. Please try again.';
+      }
       throw new Error(errorMessage);
     } finally {
       setIsLoading(false);
