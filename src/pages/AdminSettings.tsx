@@ -101,6 +101,8 @@ const AdminSettings = () => {
     }
     try {
       await deleteUser(id);
+      // Sync users immediately to refresh the list from localStorage
+      syncUsers();
       setDeleteConfirm(null);
       toast.success('User deleted successfully from Firebase and database');
     } catch (error: any) {
