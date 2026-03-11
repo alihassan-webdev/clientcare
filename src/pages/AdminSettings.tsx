@@ -324,16 +324,20 @@ const AdminSettings = () => {
                   </td>
                   <td className="px-4 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => startEdit(u)} className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      {u.id !== currentUser?.id && !u.isProtected && (
-                        <button onClick={() => setDeleteConfirm(u.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                      {u.email !== 'ali.hassan@aviratechnologies.com' && (
+                        <>
+                          <button onClick={() => startEdit(u)} className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          {u.id !== currentUser?.id && !u.isProtected && (
+                            <button onClick={() => setDeleteConfirm(u.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </>
                       )}
-                      {u.isProtected && (
-                        <button disabled className="rounded-lg p-2 text-muted-foreground cursor-not-allowed" title="This account is protected and cannot be deleted">
+                      {(u.isProtected || u.email === 'ali.hassan@aviratechnologies.com') && (
+                        <button disabled className="rounded-lg p-2 text-muted-foreground cursor-not-allowed" title="This account is protected and cannot be modified">
                           <Lock className="h-3.5 w-3.5" />
                         </button>
                       )}

@@ -210,7 +210,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem('cc_user');
         setUser(null);
         setRole(null);
+      } else {
+        // For other users, call Cloud Function to delete from Firebase
+        // This requires a backend Cloud Function with Admin SDK access
+        try {
+          await fetch('/api/deleteUser', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: id })
+          }).then(res => {
+            if (!res.ok) throw new Error('Failed to delete user from Firebase');
+            return res.json();
+          });
+        } catch (firebaseError) {
+          // Log the error but continue with local deletion
+          // This allows the app to work even without a backend Cloud Function
+          console.warn('Could not delete user from Firebase Auth:', firebaseError);
+        }
       }
+
       // Remove from local database
       setUsers(prev => prev.filter(u => u.id !== id));
     } catch (error: any) {
