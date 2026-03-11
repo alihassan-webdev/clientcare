@@ -46,6 +46,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // Initialize localStorage with mock data if empty
+  useEffect(() => {
+    const stored = localStorage.getItem('cc_users');
+    if (!stored) {
+      localStorage.setItem('cc_users', JSON.stringify(mockUsers));
+    }
+  }, []);
+
   // Persist users to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('cc_users', JSON.stringify(users));
@@ -90,7 +98,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // If user didn't exist in database and we created them as admin, add them to the users list
       if (!existingUser) {
-        setUsers(prev => [...prev, userObj]);
+        setUsers(prev => {
+          const updated = [...prev, userObj];
+          return updated;
+        });
       }
 
       const token = userCredential.user.getIdToken ? await userCredential.user.getIdToken() : 'firebase_jwt_' + Date.now();
@@ -136,8 +147,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
       setUsers(prev => {
         const updated = [...prev, newUser];
-        // Persist immediately to localStorage for seamless sync
-        localStorage.setItem('cc_users', JSON.stringify(updated));
         return updated;
       });
       return newUser;
@@ -239,11 +248,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // Remove from local database and persist immediately
+      // Remove from local database
       setUsers(prev => {
         const updated = prev.filter(u => u.id !== id);
-        // Persist immediately to localStorage for seamless sync
-        localStorage.setItem('cc_users', JSON.stringify(updated));
         return updated;
       });
     } catch (error: any) {
@@ -257,11 +264,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const storedUsers = localStorage.getItem('cc_users');
       if (storedUsers) {
         const loadedUsers = JSON.parse(storedUsers);
-        setUsers(loadedUsers);
+        if (Array.isArray(loadedUsers)) {
+          setUsers(loadedUsers);
+        } else {
+          console.error('Invalid users data format, falling back to mock data');
+          setUsers(mockUsers);
+        }
       } else {
-        // If no users in storage, use mock data and persist it
+        // If no users in storage, use mock data
         setUsers(mockUsers);
-        localStorage.setItem('cc_users', JSON.stringify(mockUsers));
       }
     } catch (error) {
       console.error('Failed to sync users from storage:', error);
