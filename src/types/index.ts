@@ -15,6 +15,7 @@ export interface User {
   company: string;
   password?: string;
   registeredAt?: string;
+  isProtected?: boolean;
 }
 
 export interface Message {

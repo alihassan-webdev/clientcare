@@ -11,11 +11,12 @@ interface AuthContextType {
   isLoading: boolean;
   users: User[];
   login: (email: string, password: string) => Promise<void>;
-  addUser: (name: string, email: string, phone: string, company: string, password: string) => Promise<User>;
+  addUser: (name: string, email: string, phone: string, company: string, password: string, userRole?: UserRole) => Promise<User>;
   logout: () => void;
   updateProfile: (updates: Partial<User> & { password?: string }) => void;
   updateUser: (id: string, updates: Partial<User> & { password?: string }) => void;
   deleteUser: (id: string) => Promise<void>;
+  syncUsers: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -50,6 +51,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('cc_users', JSON.stringify(users));
   }, [users]);
 
+  // Listen for storage changes (e.g., when users are modified in another tab)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'cc_users' && e.newValue) {
+        try {
+          const updatedUsers = JSON.parse(e.newValue);
+          setUsers(updatedUsers);
+        } catch (error) {
+          console.error('Failed to sync users from storage:', error);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
     try {
@@ -82,25 +100,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(userObj);
       setRole(userObj.role);
     } catch (error: any) {
-      const errorMessage = error?.code === 'auth/user-not-found'
-        ? 'Email not registered'
-        : error?.code === 'auth/wrong-password'
-        ? 'Invalid password'
-        : error?.message || 'Login failed';
+      let errorMessage = 'Login failed';
+
+      if (error?.code === 'auth/user-not-found') {
+        errorMessage = 'Email not registered';
+      } else if (error?.code === 'auth/wrong-password') {
+        errorMessage = 'Invalid password';
+      } else if (error?.code === 'auth/invalid-credential') {
+        errorMessage = 'Invalid email or password';
+      } else if (error?.code === 'auth/invalid-email') {
+        errorMessage = 'Please enter a valid email address';
+      } else if (error?.code === 'auth/user-disabled') {
+        errorMessage = 'This account has been disabled';
+      } else if (error?.code === 'auth/too-many-requests') {
+        errorMessage = 'Too many login attempts. Please try again later';
+      } else {
+        errorMessage = error?.message || 'Login failed. Please try again.';
+      }
       throw new Error(errorMessage);
     } finally {
       setIsLoading(false);
     }
   }, [users]);
 
-  const addUser = useCallback(async (name: string, email: string, phone: string, company: string, password: string) => {
+  const addUser = useCallback(async (name: string, email: string, phone: string, company: string, password: string, userRole: UserRole = 'customer') => {
     try {
       // Create user in Firebase
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
 
       const newUser: User = {
         id: userCredential.user.uid,
-        name, email, phone, role: 'customer', company,
+        name, email, phone, role: userRole, company,
         password,
         registeredAt: new Date().toISOString(),
       };
@@ -140,6 +170,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user?.id]);
 
   const updateUser = useCallback((id: string, updates: Partial<User> & { password?: string }) => {
+    // Check if trying to change role of protected user
+    const userToUpdate = users.find(u => u.id === id);
+    if (userToUpdate?.isProtected && updates.role && updates.role !== userToUpdate.role) {
+      throw new Error('Cannot change the role of a protected account');
+    }
+
     setUsers(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
     if (user?.id === id) {
       // If role is being changed for current user, logout after a short delay
@@ -155,10 +191,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return updated;
       });
     }
-  }, [user?.id, user?.role, logout]);
+  }, [user?.id, user?.role, logout, users]);
 
   const deleteUser = useCallback(async (id: string) => {
     try {
+      // Check if user is protected - cannot be deleted by anyone
+      const userToDelete = users.find(u => u.id === id);
+      if (userToDelete?.isProtected) {
+        throw new Error('This account is protected and cannot be deleted');
+      }
+
       // If deleting the current user
       if (user?.id === id && auth.currentUser) {
         await firebaseDeleteUser(auth.currentUser);
@@ -175,10 +217,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const errorMessage = error?.message || 'Failed to delete user';
       throw new Error(errorMessage);
     }
-  }, [user?.id]);
+  }, [user?.id, users]);
+
+  const syncUsers = useCallback(() => {
+    try {
+      const storedUsers = localStorage.getItem('cc_users');
+      if (storedUsers) {
+        const loadedUsers = JSON.parse(storedUsers);
+        setUsers(loadedUsers);
+      }
+    } catch (error) {
+      console.error('Failed to sync users from storage:', error);
+    }
+  }, []);
 
   return (
-    <AuthContext.Provider value={{ user, role, isAuthenticated: !!user, isLoading, users, login, addUser, logout, updateProfile, updateUser, deleteUser }}>
+    <AuthContext.Provider value={{ user, role, isAuthenticated: !!user, isLoading, users, login, addUser, logout, updateProfile, updateUser, deleteUser, syncUsers }}>
       {children}
     </AuthContext.Provider>
   );

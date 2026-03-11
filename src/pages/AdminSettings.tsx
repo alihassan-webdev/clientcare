@@ -1,19 +1,24 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { User } from '@/types';
 import { toast } from 'sonner';
-import { Users, Pencil, Trash2, X, Save, Eye, EyeOff, Search, Plus } from 'lucide-react';
+import { Users, Pencil, Trash2, X, Save, Eye, EyeOff, Search, Plus, Lock } from 'lucide-react';
 
 const AdminSettings = () => {
-  const { users, updateUser, deleteUser, addUser, user: currentUser } = useAuth();
+  const { users, updateUser, deleteUser, addUser, user: currentUser, syncUsers } = useAuth();
   const [search, setSearch] = useState('');
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' as const });
   const [showPassword, setShowPassword] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [showAddUser, setShowAddUser] = useState(false);
-  const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', company: '', password: '' });
+  const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' as const });
   const [showAddPassword, setShowAddPassword] = useState(false);
+
+  // Sync users from database on component mount
+  useEffect(() => {
+    syncUsers();
+  }, [syncUsers]);
 
   const filteredUsers = users.filter(u => {
     if (!search) return true;
@@ -37,19 +42,27 @@ const AdminSettings = () => {
       toast.error('Password must be at least 6 characters');
       return;
     }
+    if (editingUser.isProtected && editForm.role !== editingUser.role) {
+      toast.error('Cannot change the role of a protected account');
+      return;
+    }
     const updates: any = { name: editForm.name, email: editForm.email, phone: editForm.phone, company: editForm.company, role: editForm.role };
     if (editForm.password) updates.password = editForm.password;
-    updateUser(editingUser.id, updates);
+    try {
+      updateUser(editingUser.id, updates);
 
-    // If current user's role changed, show logout notification and trigger logout
-    if (currentUser?.id === editingUser.id && currentUser.role !== editForm.role) {
-      setTimeout(() => {
-        toast.info('Your role has been changed. Please log in again.');
-      }, 500);
+      // If current user's role changed, show logout notification and trigger logout
+      if (currentUser?.id === editingUser.id && currentUser.role !== editForm.role) {
+        setTimeout(() => {
+          toast.info('Your role has been changed. Please log in again.');
+        }, 500);
+      }
+
+      setEditingUser(null);
+      toast.success('User updated successfully');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to update user');
     }
-
-    setEditingUser(null);
-    toast.success('User updated successfully');
   };
 
   const handleAddUser = async () => {
@@ -67,9 +80,9 @@ const AdminSettings = () => {
       return;
     }
     try {
-      await addUser(addForm.name, addForm.email, addForm.phone, addForm.company, addForm.password);
+      await addUser(addForm.name, addForm.email, addForm.phone, addForm.company, addForm.password, addForm.role);
       setShowAddUser(false);
-      setAddForm({ name: '', email: '', phone: '', company: '', password: '' });
+      setAddForm({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' });
       toast.success('User added successfully to Firebase and database');
     } catch (error: any) {
       toast.error(error?.message || 'Failed to add user');
@@ -79,6 +92,11 @@ const AdminSettings = () => {
   const handleDelete = async (id: string) => {
     if (id === currentUser?.id) {
       toast.error('You cannot delete your own account');
+      return;
+    }
+    const userToDelete = users.find(u => u.id === id);
+    if (userToDelete?.isProtected) {
+      toast.error('This account is protected and cannot be deleted');
       return;
     }
     try {
@@ -105,7 +123,7 @@ const AdminSettings = () => {
           <p className="mt-0.5 text-sm text-muted-foreground">Manage all registered users</p>
         </div>
         <button
-          onClick={() => { setShowAddUser(true); setAddForm({ name: '', email: '', phone: '', company: '', password: '' }); setShowAddPassword(false); }}
+          onClick={() => { setShowAddUser(true); setAddForm({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' }); setShowAddPassword(false); }}
           className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-all hover:opacity-90 hover:-translate-y-0.5 shadow-primary-glow"
         >
           <Plus className="h-4 w-4" /> Add User
@@ -142,6 +160,13 @@ const AdminSettings = () => {
                   <label className="mb-1.5 block text-sm font-medium text-card-foreground">Company</label>
                   <input type="text" value={addForm.company} onChange={e => setAddForm(p => ({ ...p, company: e.target.value }))} placeholder="Company Name" className={inputClasses} />
                 </div>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-card-foreground">Role</label>
+                <select value={addForm.role} onChange={e => setAddForm(p => ({ ...p, role: e.target.value as 'admin' | 'customer' }))} className={inputClasses}>
+                  <option value="customer">Customer</option>
+                  <option value="admin">Admin</option>
+                </select>
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-card-foreground">Password</label>
@@ -195,8 +220,14 @@ const AdminSettings = () => {
                 </div>
               </div>
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-card-foreground">Role</label>
-                <select value={editForm.role} onChange={e => setEditForm(p => ({ ...p, role: e.target.value as 'admin' | 'customer' }))} className={inputClasses}>
+                <label className="mb-1.5 block text-sm font-medium text-card-foreground">Role {editingUser?.isProtected && <span className="text-amber-600">(Protected)</span>}</label>
+                <select
+                  value={editForm.role}
+                  onChange={e => setEditForm(p => ({ ...p, role: e.target.value as 'admin' | 'customer' }))}
+                  disabled={editingUser?.isProtected}
+                  className={`${inputClasses} ${editingUser?.isProtected ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  title={editingUser?.isProtected ? 'Cannot change role of protected account' : ''}
+                >
                   <option value="customer">Customer</option>
                   <option value="admin">Admin</option>
                 </select>
@@ -278,20 +309,32 @@ const AdminSettings = () => {
                   <td className="px-4 py-3.5 text-muted-foreground">{u.company}</td>
                   <td className="px-4 py-3.5 text-muted-foreground whitespace-nowrap">{formatDate(u.registeredAt)}</td>
                   <td className="px-4 py-3.5">
-                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                      u.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-secondary text-secondary-foreground'
-                    }`}>
-                      {u.role === 'admin' ? 'Admin' : 'Customer'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                        u.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-secondary text-secondary-foreground'
+                      }`}>
+                        {u.role === 'admin' ? 'Admin' : 'Customer'}
+                      </span>
+                      {u.isProtected && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                          <Lock className="h-3 w-3" /> Protected
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1.5">
                       <button onClick={() => startEdit(u)} className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
-                      {u.id !== currentUser?.id && (
+                      {u.id !== currentUser?.id && !u.isProtected && (
                         <button onClick={() => setDeleteConfirm(u.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
                           <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {u.isProtected && (
+                        <button disabled className="rounded-lg p-2 text-muted-foreground cursor-not-allowed" title="This account is protected and cannot be deleted">
+                          <Lock className="h-3.5 w-3.5" />
                         </button>
                       )}
                     </div>
