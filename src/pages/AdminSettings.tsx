@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { User } from '@/types';
 import { toast } from 'sonner';
 import { Users, Pencil, Trash2, X, Save, Eye, EyeOff, Search, Plus, Lock } from 'lucide-react';
 
 const AdminSettings = () => {
-  const { users, updateUser, deleteUser, addUser, user: currentUser } = useAuth();
+  const { users, updateUser, deleteUser, addUser, user: currentUser, syncUsers } = useAuth();
   const [search, setSearch] = useState('');
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' as const });
@@ -14,6 +14,11 @@ const AdminSettings = () => {
   const [showAddUser, setShowAddUser] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' as const });
   const [showAddPassword, setShowAddPassword] = useState(false);
+
+  // Sync users from database on component mount
+  useEffect(() => {
+    syncUsers();
+  }, [syncUsers]);
 
   const filteredUsers = users.filter(u => {
     if (!search) return true;

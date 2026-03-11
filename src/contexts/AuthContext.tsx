@@ -16,6 +16,7 @@ interface AuthContextType {
   updateProfile: (updates: Partial<User> & { password?: string }) => void;
   updateUser: (id: string, updates: Partial<User> & { password?: string }) => void;
   deleteUser: (id: string) => Promise<void>;
+  syncUsers: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -49,6 +50,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     localStorage.setItem('cc_users', JSON.stringify(users));
   }, [users]);
+
+  // Listen for storage changes (e.g., when users are modified in another tab)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'cc_users' && e.newValue) {
+        try {
+          const updatedUsers = JSON.parse(e.newValue);
+          setUsers(updatedUsers);
+        } catch (error) {
+          console.error('Failed to sync users from storage:', error);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
@@ -189,8 +207,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [user?.id]);
 
+  const syncUsers = useCallback(() => {
+    try {
+      const storedUsers = localStorage.getItem('cc_users');
+      if (storedUsers) {
+        const loadedUsers = JSON.parse(storedUsers);
+        setUsers(loadedUsers);
+      }
+    } catch (error) {
+      console.error('Failed to sync users from storage:', error);
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, role, isAuthenticated: !!user, isLoading, users, login, addUser, logout, updateProfile, updateUser, deleteUser }}>
+    <AuthContext.Provider value={{ user, role, isAuthenticated: !!user, isLoading, users, login, addUser, logout, updateProfile, updateUser, deleteUser, syncUsers }}>
       {children}
     </AuthContext.Provider>
   );
