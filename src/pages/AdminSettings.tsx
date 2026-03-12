@@ -2,15 +2,15 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { User } from '@/types';
 import { toast } from 'sonner';
-import { Users, Pencil, Trash2, X, Save, Eye, EyeOff, Search, Plus, Lock, RotateCw } from 'lucide-react';
+import { Users, Pencil, X, Save, Eye, EyeOff, Search, Plus, Lock, RotateCw, Power, Check } from 'lucide-react';
 
 const AdminSettings = () => {
-  const { users, updateUser, deleteUser, addUser, user: currentUser, syncUsers, usersLoading } = useAuth();
+  const { users, updateUser, addUser, user: currentUser, syncUsers, usersLoading, disableUser, enableUser } = useAuth();
   const [search, setSearch] = useState('');
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' as const });
   const [showPassword, setShowPassword] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [statusConfirm, setStatusConfirm] = useState<{ userId: string; action: 'disable' | 'enable' } | null>(null);
   const [showAddUser, setShowAddUser] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' as const });
   const [showAddPassword, setShowAddPassword] = useState(false);
@@ -87,23 +87,39 @@ const AdminSettings = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDisable = async (id: string) => {
     if (id === currentUser?.id) {
-      toast.error('You cannot delete your own account');
+      toast.error('You cannot disable your own account');
       return;
     }
-    const userToDelete = users.find(u => u.id === id);
-    if (userToDelete?.isProtected) {
-      toast.error('This account is protected and cannot be deleted');
+    const userToDisable = users.find(u => u.id === id);
+    if (userToDisable?.isProtected) {
+      toast.error('This account is protected and cannot be disabled');
       return;
     }
     try {
-      await deleteUser(id);
-      // Real-time listener will automatically remove the deleted user from the list
-      setDeleteConfirm(null);
-      toast.success('User deleted successfully');
+      await disableUser(id);
+      // Real-time listener will automatically update the user status
+      setStatusConfirm(null);
+      toast.success('User disabled successfully');
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to delete user');
+      toast.error(error?.message || 'Failed to disable user');
+    }
+  };
+
+  const handleEnable = async (id: string) => {
+    const userToEnable = users.find(u => u.id === id);
+    if (userToEnable?.isProtected) {
+      toast.error('This account is protected');
+      return;
+    }
+    try {
+      await enableUser(id);
+      // Real-time listener will automatically update the user status
+      setStatusConfirm(null);
+      toast.success('User enabled successfully');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to enable user');
     }
   };
 
@@ -263,16 +279,29 @@ const AdminSettings = () => {
         </div>
       )}
 
-      {/* Delete Confirmation */}
-      {deleteConfirm && (
+      {/* Status Confirmation */}
+      {statusConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 backdrop-blur-sm">
           <div className="mx-4 w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-premium-xl animate-scale-in">
-            <h3 className="font-heading text-lg font-semibold text-card-foreground">Delete User</h3>
-            <p className="mt-2 text-sm text-muted-foreground">Are you sure you want to delete this user? This action cannot be undone.</p>
-            <div className="mt-6 flex justify-end gap-2.5">
-              <button onClick={() => setDeleteConfirm(null)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent">Cancel</button>
-              <button onClick={() => handleDelete(deleteConfirm)} className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90">Delete</button>
-            </div>
+            {statusConfirm.action === 'disable' ? (
+              <>
+                <h3 className="font-heading text-lg font-semibold text-card-foreground">Disable User</h3>
+                <p className="mt-2 text-sm text-muted-foreground">Are you sure you want to disable this user? They will not be able to log in.</p>
+                <div className="mt-6 flex justify-end gap-2.5">
+                  <button onClick={() => setStatusConfirm(null)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent">Cancel</button>
+                  <button onClick={() => handleDisable(statusConfirm.userId)} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-700">Disable</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="font-heading text-lg font-semibold text-card-foreground">Enable User</h3>
+                <p className="mt-2 text-sm text-muted-foreground">Enable this user so they can log in again?</p>
+                <div className="mt-6 flex justify-end gap-2.5">
+                  <button onClick={() => setStatusConfirm(null)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent">Cancel</button>
+                  <button onClick={() => handleEnable(statusConfirm.userId)} className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700">Enable</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -318,6 +347,7 @@ const AdminSettings = () => {
                 <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Company</th>
                 <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Registered</th>
                 <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Role</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
                 <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Actions</th>
               </tr>
             </thead>
@@ -343,6 +373,21 @@ const AdminSettings = () => {
                       )}
                     </div>
                   </td>
+                  <td className="px-4 py-3.5">
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                      u.status === 'active' ? 'bg-green-500/10 text-green-700' : 'bg-red-500/10 text-red-700'
+                    }`}>
+                      {u.status === 'active' ? (
+                        <>
+                          <Check className="h-3 w-3" /> Active
+                        </>
+                      ) : (
+                        <>
+                          <Power className="h-3 w-3" /> Disabled
+                        </>
+                      )}
+                    </span>
+                  </td>
                   <td className="px-4 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1.5">
                       {u.email !== 'ali.hassan@aviratechnologies.com' && (
@@ -351,9 +396,15 @@ const AdminSettings = () => {
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
                           {u.id !== currentUser?.id && !u.isProtected && (
-                            <button onClick={() => setDeleteConfirm(u.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                            u.status === 'active' ? (
+                              <button onClick={() => setStatusConfirm({ userId: u.id, action: 'disable' })} className="rounded-lg p-2 text-muted-foreground hover:bg-amber-500/10 hover:text-amber-600 transition-colors" title="Disable">
+                                <Power className="h-3.5 w-3.5" />
+                              </button>
+                            ) : (
+                              <button onClick={() => setStatusConfirm({ userId: u.id, action: 'enable' })} className="rounded-lg p-2 text-muted-foreground hover:bg-green-500/10 hover:text-green-600 transition-colors" title="Enable">
+                                <Check className="h-3.5 w-3.5" />
+                              </button>
+                            )
                           )}
                         </>
                       )}
@@ -368,7 +419,7 @@ const AdminSettings = () => {
               ))}
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">No users found.</td>
+                  <td colSpan={8} className="px-4 py-16 text-center text-muted-foreground">No users found.</td>
                 </tr>
               )}
             </tbody>

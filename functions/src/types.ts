@@ -7,6 +7,7 @@ export interface FirestoreUser {
   email: string;
   name: string;
   role: 'admin' | 'customer';
+  status: 'active' | 'disabled';
   createdAt: number;
   updatedAt: number;
   syncedWithAuth?: boolean;

@@ -18,6 +18,8 @@ interface AuthContextType {
   updateProfile: (updates: Partial<User> & { password?: string }) => void;
   updateUser: (id: string, updates: Partial<User> & { password?: string }) => void;
   deleteUser: (id: string) => Promise<void>;
+  disableUser: (id: string) => Promise<void>;
+  enableUser: (id: string) => Promise<void>;
   syncUsers: () => void;
   usersLoading: boolean;
 }
@@ -72,6 +74,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               phone: data.phone || '',
               company: data.company || '',
               role: (data.role || 'customer') as UserRole,
+              status: data.status || 'active',
               registeredAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
             });
           });
@@ -227,6 +230,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           phone,
           company,
           role: userRole,
+          status: 'active',
           createdAt: Date.now(),
           updatedAt: Date.now(),
           syncedWithAuth: true,
@@ -238,6 +242,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const newUser: User = {
         id: uid,
         name, email, phone, role: userRole, company,
+        status: 'active',
         password,
         registeredAt: new Date().toISOString(),
       };
@@ -374,6 +379,75 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [user?.id, users]);
 
+  const disableUser = useCallback(async (id: string) => {
+    try {
+      // Check if user is protected - cannot be disabled
+      const userToDisable = users.find(u => u.id === id);
+      if (userToDisable?.isProtected) {
+        throw new Error('This account is protected and cannot be disabled');
+      }
+
+      // Check if trying to disable current user
+      if (user?.id === id) {
+        throw new Error('You cannot disable your own account');
+      }
+
+      // Use secure Cloud Function to disable user
+      try {
+        const functions = getFunctions();
+        const disableUserSecure = httpsCallable(functions, 'disableUserSecure');
+        await disableUserSecure({ userId: id });
+      } catch (functionError: any) {
+        // If Cloud Function is not available, fall back to direct Firestore update
+        console.warn('Cloud Function disable failed, trying direct Firestore update:', functionError);
+        const db = getFirestore();
+        await updateDoc(doc(db, 'users', id), { status: 'disabled', updatedAt: Date.now() });
+      }
+
+      // Update local state - the real-time listener will sync the final state
+      setUsers(prev => {
+        const updated = prev.map(u => u.id === id ? { ...u, status: 'disabled' } : u);
+        localStorage.setItem('cc_users', JSON.stringify(updated));
+        return updated;
+      });
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to disable user';
+      throw new Error(errorMessage);
+    }
+  }, [user?.id, users]);
+
+  const enableUser = useCallback(async (id: string) => {
+    try {
+      // Check if user is protected - cannot be disabled so no need to enable
+      const userToEnable = users.find(u => u.id === id);
+      if (userToEnable?.isProtected) {
+        throw new Error('This account is protected');
+      }
+
+      // Use secure Cloud Function to enable user
+      try {
+        const functions = getFunctions();
+        const enableUserSecure = httpsCallable(functions, 'enableUserSecure');
+        await enableUserSecure({ userId: id });
+      } catch (functionError: any) {
+        // If Cloud Function is not available, fall back to direct Firestore update
+        console.warn('Cloud Function enable failed, trying direct Firestore update:', functionError);
+        const db = getFirestore();
+        await updateDoc(doc(db, 'users', id), { status: 'active', updatedAt: Date.now() });
+      }
+
+      // Update local state - the real-time listener will sync the final state
+      setUsers(prev => {
+        const updated = prev.map(u => u.id === id ? { ...u, status: 'active' } : u);
+        localStorage.setItem('cc_users', JSON.stringify(updated));
+        return updated;
+      });
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to enable user';
+      throw new Error(errorMessage);
+    }
+  }, [user?.id, users]);
+
   // Manual sync function - re-establishes the real-time listener if it was disconnected
   const syncUsers = useCallback(() => {
     setUsersLoading(true);
@@ -386,7 +460,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [setupRealtimeListener]);
 
   return (
-    <AuthContext.Provider value={{ user, role, isAuthenticated: !!user, isLoading, usersLoading, users, login, addUser, logout, updateProfile, updateUser, deleteUser, syncUsers }}>
+    <AuthContext.Provider value={{ user, role, isAuthenticated: !!user, isLoading, usersLoading, users, login, addUser, logout, updateProfile, updateUser, deleteUser, disableUser, enableUser, syncUsers }}>
       {children}
     </AuthContext.Provider>
   );
