@@ -36,15 +36,45 @@ const CreateTicket = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Step 1: Log form submission attempt
+    console.log('=== FORM SUBMISSION INITIATED ===');
+    console.log('Current form values:', {
+      customerName,
+      customerEmail,
+      customerPhone,
+      customerLocation,
+      industry,
+      subject,
+      description,
+      priority,
+      attachmentCount: attachments.length,
+    });
+
+    // Step 2: Validate required fields client-side
     if (!priority || !subject.trim() || !description.trim() || !customerName.trim() || !customerEmail.trim()) {
+      console.error('Client-side validation failed. Missing fields:');
+      if (!customerName.trim()) console.error('  - Full Name is empty');
+      if (!customerEmail.trim()) console.error('  - Email is empty');
+      if (!subject.trim()) console.error('  - Subject is empty');
+      if (!description.trim()) console.error('  - Description is empty');
+      if (!priority) console.error('  - Priority is not selected');
+
       toast.error('Please fill in all required fields');
       return;
     }
 
+    console.log('Client-side validation: PASSED');
+    console.log('Priority value before submission:', {
+      value: priority,
+      type: typeof priority,
+      expected: 'Low | Medium | High | Critical',
+    });
+
     setIsSubmitting(true);
     try {
       const attachmentNames = attachments.map(f => f.name).join(', ');
-      const ticket = await addTicket({
+      const ticketPayload = {
         subject,
         description,
         priority: priority as TicketPriority,
@@ -56,12 +86,27 @@ const CreateTicket = () => {
         location: customerLocation,
         industry,
         attachment: attachmentNames || undefined,
+      };
+
+      console.log('Submitting ticket with payload:', ticketPayload);
+      console.log('User context:', {
+        userId: user?.id,
+        userName: user?.name,
+        userEmail: user?.email,
+        userRole: user?.role,
       });
 
+      const ticket = await addTicket(ticketPayload);
+
       if (ticket) {
+        console.log('✓ Ticket created successfully!', ticket);
         toast.success(`Ticket ${ticket.ticketId} created successfully!`);
         navigate('/tickets');
+      } else {
+        console.error('✗ addTicket returned null - check error logs above');
       }
+    } catch (error) {
+      console.error('Unexpected error in form submission:', error);
     } finally {
       setIsSubmitting(false);
     }
