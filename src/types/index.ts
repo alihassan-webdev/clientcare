@@ -1,6 +1,6 @@
 export type UserRole = 'customer' | 'admin';
 
-export type TicketStatus = 'Open' | 'In Progress' | 'Resolved';
+export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
 
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Critical';
 
@@ -45,25 +45,26 @@ export interface TicketRating {
 
 export interface Ticket {
   id: string;
-  company: string;
-  priority: TicketPriority;
+  ticketId: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  location: string;
+  industry: string;
   subject: string;
   description: string;
-  customerName: string;
-  customerEmail: string;
-  customerPhone: string;
-  customerLocation: string;
-  industry: string;
+  priority: TicketPriority;
   status: TicketStatus;
   createdAt: string;
-  updatedAt: string;
-  slaDeadline: string;
-  isOverdue: boolean;
   createdBy: string;
-  messages: Message[];
+  company?: string;
+  updatedAt?: string;
+  slaDeadline?: string;
+  isOverdue?: boolean;
+  messages?: Message[];
   attachment?: string;
-  timeline: TimelineEvent[];
-  tags: TicketTag[];
+  timeline?: TimelineEvent[];
+  tags?: TicketTag[];
   rating?: TicketRating;
 }
 

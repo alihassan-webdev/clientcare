@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { Ticket, TicketPriority, TicketStatus, Message, TimelineEvent, TicketTag, TicketRating, ActivityLog } from '@/types';
-import { mockTickets } from '@/data/mockData';
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query } from 'firebase/firestore';
+import app from '@/firebase';
+import { toast } from 'sonner';
 
 const SLA_HOURS: Record<TicketPriority, number> = {
   Critical: 1,
@@ -12,11 +14,12 @@ const SLA_HOURS: Record<TicketPriority, number> = {
 interface TicketContextType {
   tickets: Ticket[];
   activityLogs: ActivityLog[];
-  addTicket: (data: { subject: string; description: string; priority: TicketPriority; createdBy: string; company: string; customerName: string; customerEmail: string; customerPhone: string; customerLocation: string; industry: string; attachment?: string }) => Ticket;
-  updateTicket: (id: string, updates: Partial<Ticket>) => void;
-  deleteTicket: (id: string, actor?: string) => void;
+  loading: boolean;
+  addTicket: (data: { subject: string; description: string; priority: TicketPriority; createdBy: string; company?: string; fullName: string; email: string; phone: string; location: string; industry: string; attachment?: string }) => Promise<Ticket | null>;
+  updateTicket: (id: string, updates: Partial<Ticket>) => Promise<void>;
+  deleteTicket: (id: string, actor?: string) => Promise<void>;
   addMessage: (ticketId: string, message: Omit<Message, 'id' | 'ticketId' | 'createdAt'>) => void;
-  changeStatus: (ticketId: string, status: TicketStatus, actor?: string) => void;
+  changeStatus: (ticketId: string, status: TicketStatus, actor?: string) => Promise<void>;
   addTag: (ticketId: string, tag: TicketTag, actor?: string) => void;
   removeTag: (ticketId: string, tag: TicketTag) => void;
   addActivityLog: (log: Omit<ActivityLog, 'id' | 'timestamp'>) => void;
@@ -31,9 +34,35 @@ export const useTickets = () => {
 };
 
 export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [tickets, setTickets] = useState<Ticket[]>(mockTickets);
-  const [nextId, setNextId] = useState(mockTickets.length + 1);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const db = getFirestore(app);
+
+  // Set up real-time listener for tickets from Firestore
+  useEffect(() => {
+    const ticketsCollection = collection(db, 'tickets');
+    const q = query(ticketsCollection);
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const ticketsData: Ticket[] = [];
+      snapshot.forEach((doc) => {
+        ticketsData.push({
+          id: doc.id,
+          ...doc.data(),
+        } as Ticket);
+      });
+      // Sort by createdAt descending (newest first)
+      ticketsData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setTickets(ticketsData);
+      setLoading(false);
+    }, (error) => {
+      console.error('Error listening to tickets:', error);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [db]);
 
   const addActivityLog = useCallback((log: Omit<ActivityLog, 'id' | 'timestamp'>) => {
     setActivityLogs(prev => [{
@@ -43,52 +72,83 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, ...prev]);
   }, []);
 
-  const addTicket = useCallback((data: { subject: string; description: string; priority: TicketPriority; createdBy: string; company: string; customerName: string; customerEmail: string; customerPhone: string; customerLocation: string; industry: string; attachment?: string }) => {
-    const now = new Date().toISOString();
-    const slaMs = SLA_HOURS[data.priority] * 3_600_000;
-    const ticketId = `TKT-${String(nextId).padStart(4, '0')}`;
+  const addTicket = useCallback(async (data: { subject: string; description: string; priority: TicketPriority; createdBy: string; company?: string; fullName: string; email: string; phone: string; location: string; industry: string; attachment?: string }) => {
+    try {
+      const now = new Date().toISOString();
+      const ticketsCollection = collection(db, 'tickets');
 
-    // Auto admin welcome message
-    const autoMsg: Message = {
-      id: `msg-auto-${Date.now()}`,
-      ticketId,
-      author: 'Support Team',
-      authorRole: 'admin',
-      content: `Thank you for contacting us, ${data.customerName}. Your ticket (${ticketId}) has been received. Our team will review your issue and resolve it as soon as possible.`,
-      isInternal: false,
-      createdAt: now,
-    };
+      const ticketData: Omit<Ticket, 'id'> = {
+        ticketId: '', // Will be set after document creation
+        fullName: data.fullName,
+        email: data.email,
+        phone: data.phone,
+        location: data.location,
+        industry: data.industry,
+        subject: data.subject,
+        description: data.description,
+        priority: data.priority,
+        status: 'open',
+        createdAt: now,
+        createdBy: data.createdBy,
+        company: data.company,
+        updatedAt: now,
+        attachment: data.attachment,
+        messages: [],
+        timeline: [
+          { 
+            id: `tl-${Date.now()}`, 
+            type: 'created', 
+            description: `Ticket created by ${data.fullName}`, 
+            timestamp: now 
+          },
+        ],
+        tags: [],
+      };
 
-    const ticket: Ticket = {
-      ...data,
-      id: ticketId,
-      status: 'Open',
-      createdAt: now,
-      updatedAt: now,
-      slaDeadline: new Date(Date.now() + slaMs).toISOString(),
-      isOverdue: false,
-      messages: [autoMsg],
-      timeline: [
-        { id: `tl-${Date.now()}`, type: 'created', description: `Ticket created by ${data.customerName}`, timestamp: now },
-      ],
-      tags: [],
-    };
-    setNextId(prev => prev + 1);
-    setTickets(prev => [ticket, ...prev]);
-    addActivityLog({ type: 'ticket_created', description: `Ticket ${ticketId} created`, actor: data.customerName });
-    return ticket;
-  }, [nextId, addActivityLog]);
+      const docRef = await addDoc(ticketsCollection, ticketData);
+      
+      // Update the document with the ticketId based on document ID
+      const ticketId = `TCK-${docRef.id.substring(0, 8).toUpperCase()}`;
+      await updateDoc(docRef, { ticketId });
 
-  const updateTicket = useCallback((id: string, updates: Partial<Ticket>) => {
-    setTickets(prev => prev.map(t =>
-      t.id === id ? { ...t, ...updates, updatedAt: new Date().toISOString() } : t
-    ));
-  }, []);
+      const newTicket: Ticket = {
+        id: docRef.id,
+        ...ticketData,
+        ticketId,
+      };
 
-  const deleteTicket = useCallback((id: string, actor?: string) => {
-    setTickets(prev => prev.filter(t => t.id !== id));
-    addActivityLog({ type: 'ticket_closed', description: `Ticket ${id} deleted`, actor });
-  }, [addActivityLog]);
+      addActivityLog({ type: 'ticket_created', description: `Ticket ${ticketId} created`, actor: data.fullName });
+      return newTicket;
+    } catch (error) {
+      console.error('Error adding ticket:', error);
+      toast.error('Failed to create ticket');
+      return null;
+    }
+  }, [db, addActivityLog]);
+
+  const updateTicket = useCallback(async (id: string, updates: Partial<Ticket>) => {
+    try {
+      const ticketRef = doc(db, 'tickets', id);
+      await updateDoc(ticketRef, {
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Error updating ticket:', error);
+      toast.error('Failed to update ticket');
+    }
+  }, [db]);
+
+  const deleteTicket = useCallback(async (id: string, actor?: string) => {
+    try {
+      const ticketRef = doc(db, 'tickets', id);
+      await deleteDoc(ticketRef);
+      addActivityLog({ type: 'ticket_closed', description: `Ticket ${id} deleted`, actor });
+    } catch (error) {
+      console.error('Error deleting ticket:', error);
+      toast.error('Failed to delete ticket');
+    }
+  }, [db, addActivityLog]);
 
   const addMessage = useCallback((ticketId: string, message: Omit<Message, 'id' | 'ticketId' | 'createdAt'>) => {
     const now = new Date().toISOString();
@@ -105,29 +165,54 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       timestamp: now,
       actor: message.author,
     };
+    
+    // Update local state for immediate UI feedback
     setTickets(prev => prev.map(t =>
       t.id === ticketId
-        ? { ...t, messages: [...t.messages, newMsg], timeline: [...t.timeline, tlEvent], updatedAt: now }
+        ? { 
+            ...t, 
+            messages: [...(t.messages || []), newMsg], 
+            timeline: [...(t.timeline || []), tlEvent], 
+            updatedAt: now 
+          }
         : t
     ));
-    addActivityLog({ type: 'message_sent', description: `Message on ${ticketId} by ${message.author}`, actor: message.author });
-  }, [addActivityLog]);
 
-  const changeStatus = useCallback((ticketId: string, status: TicketStatus, actor?: string) => {
-    const now = new Date().toISOString();
-    const tlEvent: TimelineEvent = {
-      id: `tl-${Date.now()}`,
-      type: 'status_changed',
-      description: `Status changed to ${status}`,
-      timestamp: now,
-      actor,
-    };
-    setTickets(prev => prev.map(t =>
-      t.id === ticketId ? { ...t, status, timeline: [...t.timeline, tlEvent], updatedAt: now } : t
-    ));
-    const logType = status === 'Resolved' ? 'ticket_resolved' : 'status_changed';
-    addActivityLog({ type: logType, description: `Ticket ${ticketId} → ${status}`, actor });
-  }, [addActivityLog]);
+    // Also update in Firestore
+    updateTicket(ticketId, {
+      messages: [...(tickets.find(t => t.id === ticketId)?.messages || []), newMsg],
+      timeline: [...(tickets.find(t => t.id === ticketId)?.timeline || []), tlEvent],
+    });
+
+    addActivityLog({ type: 'message_sent', description: `Message on ${ticketId} by ${message.author}`, actor: message.author });
+  }, [updateTicket, tickets, addActivityLog]);
+
+  const changeStatus = useCallback(async (ticketId: string, status: TicketStatus, actor?: string) => {
+    try {
+      const now = new Date().toISOString();
+      const tlEvent: TimelineEvent = {
+        id: `tl-${Date.now()}`,
+        type: 'status_changed',
+        description: `Status changed to ${status}`,
+        timestamp: now,
+        actor,
+      };
+
+      const ticket = tickets.find(t => t.id === ticketId);
+      if (ticket) {
+        await updateTicket(ticketId, {
+          status,
+          timeline: [...(ticket.timeline || []), tlEvent],
+        });
+
+        const logType = status === 'resolved' ? 'ticket_resolved' : 'status_changed';
+        addActivityLog({ type: logType, description: `Ticket ${ticketId} → ${status}`, actor });
+      }
+    } catch (error) {
+      console.error('Error changing status:', error);
+      toast.error('Failed to change ticket status');
+    }
+  }, [tickets, updateTicket, addActivityLog]);
 
   const addTag = useCallback((ticketId: string, tag: TicketTag, actor?: string) => {
     const now = new Date().toISOString();
@@ -138,23 +223,48 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       timestamp: now,
       actor,
     };
+
     setTickets(prev => prev.map(t =>
-      t.id === ticketId && !t.tags.includes(tag)
-        ? { ...t, tags: [...t.tags, tag], timeline: [...t.timeline, tlEvent], updatedAt: now }
+      t.id === ticketId && !(t.tags || []).includes(tag)
+        ? { 
+            ...t, 
+            tags: [...(t.tags || []), tag], 
+            timeline: [...(t.timeline || []), tlEvent], 
+            updatedAt: now 
+          }
         : t
     ));
-  }, []);
+
+    const ticket = tickets.find(t => t.id === ticketId);
+    if (ticket && !(ticket.tags || []).includes(tag)) {
+      updateTicket(ticketId, {
+        tags: [...(ticket.tags || []), tag],
+        timeline: [...(ticket.timeline || []), tlEvent],
+      });
+    }
+  }, [updateTicket, tickets]);
 
   const removeTag = useCallback((ticketId: string, tag: TicketTag) => {
     setTickets(prev => prev.map(t =>
       t.id === ticketId
-        ? { ...t, tags: t.tags.filter(tg => tg !== tag), updatedAt: new Date().toISOString() }
+        ? { 
+            ...t, 
+            tags: (t.tags || []).filter(tg => tg !== tag), 
+            updatedAt: new Date().toISOString() 
+          }
         : t
     ));
-  }, []);
+
+    const ticket = tickets.find(t => t.id === ticketId);
+    if (ticket) {
+      updateTicket(ticketId, {
+        tags: (ticket.tags || []).filter(tg => tg !== tag),
+      });
+    }
+  }, [updateTicket, tickets]);
 
   return (
-    <TicketContext.Provider value={{ tickets, activityLogs, addTicket, updateTicket, deleteTicket, addMessage, changeStatus, addTag, removeTag, addActivityLog }}>
+    <TicketContext.Provider value={{ tickets, activityLogs, loading, addTicket, updateTicket, deleteTicket, addMessage, changeStatus, addTag, removeTag, addActivityLog }}>
       {children}
     </TicketContext.Provider>
   );

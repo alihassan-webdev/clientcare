@@ -9,8 +9,14 @@ import { TicketStatus, TicketPriority, TicketTag } from '@/types';
 import { Search, SlidersHorizontal, Tag, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-const STATUSES: TicketStatus[] = ['Open', 'In Progress', 'Resolved'];
+const STATUSES: TicketStatus[] = ['open', 'in_progress', 'resolved', 'closed'];
 const PRIORITIES: TicketPriority[] = ['Critical', 'High', 'Medium', 'Low'];
+const STATUS_LABELS: Record<TicketStatus, string> = {
+  open: 'Open',
+  in_progress: 'In Progress',
+  resolved: 'Resolved',
+  closed: 'Closed',
+};
 
 const TicketsList = () => {
   const { user, users } = useAuth();
@@ -30,11 +36,11 @@ const TicketsList = () => {
       const q = search.toLowerCase();
       result = result.filter(t => {
         return t.subject.toLowerCase().includes(q) ||
-          t.id.toLowerCase().includes(q) ||
-          t.customerName.toLowerCase().includes(q) ||
-          t.customerEmail.toLowerCase().includes(q) ||
-          t.company.toLowerCase().includes(q) ||
-          t.tags.some(tag => tag.toLowerCase().includes(q));
+          t.ticketId.toLowerCase().includes(q) ||
+          t.fullName.toLowerCase().includes(q) ||
+          t.email.toLowerCase().includes(q) ||
+          (t.company?.toLowerCase().includes(q) || false) ||
+          (t.tags || []).some(tag => tag.toLowerCase().includes(q));
       });
     }
     return result;
@@ -72,7 +78,7 @@ const TicketsList = () => {
         <div className="flex flex-wrap gap-2">
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="flex-1 min-w-[120px] rounded-lg border border-input bg-background px-3 py-2 text-sm transition-colors focus:border-ring focus:outline-none">
             <option value="">All Statuses</option>
-            {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
           </select>
           <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)} className="flex-1 min-w-[120px] rounded-lg border border-input bg-background px-3 py-2 text-sm transition-colors focus:border-ring focus:outline-none">
             <option value="">All Priorities</option>
@@ -89,7 +95,7 @@ const TicketsList = () => {
                 statusFilter === s ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'
               }`}
             >
-              {s}
+              {STATUS_LABELS[s]}
             </button>
           ))}
           <button
@@ -114,19 +120,18 @@ const TicketsList = () => {
                 {isAdmin && <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</th>}
                 <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Priority</th>
                 <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Tags</th>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">SLA</th>
-                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Updated</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Industry</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Created</th>
                 <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Action</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map(ticket => {
-                const isOverdue = new Date(ticket.slaDeadline).getTime() < Date.now() && !['Resolved', 'Closed'].includes(ticket.status);
+                const isOverdue = ticket.slaDeadline && new Date(ticket.slaDeadline).getTime() < Date.now() && !['resolved', 'closed'].includes(ticket.status);
                 return (
                   <tr key={ticket.id} className={`border-b border-border transition-colors hover:bg-accent/40 ${isOverdue ? 'bg-destructive/[0.03]' : ''}`}>
                     <td className="px-4 py-3.5">
-                      <Link to={`/tickets/${ticket.id}`} className="font-mono text-xs font-semibold text-primary hover:underline">{ticket.id}</Link>
+                      <Link to={`/tickets/${ticket.id}`} className="font-mono text-xs font-semibold text-primary hover:underline">{ticket.ticketId}</Link>
                     </td>
                     <td className="px-4 py-3.5 max-w-[250px]">
                       <Link to={`/tickets/${ticket.id}`} className="text-[13px] font-medium text-card-foreground hover:text-primary line-clamp-1 transition-colors">{ticket.subject}</Link>
@@ -134,29 +139,17 @@ const TicketsList = () => {
                     {isAdmin && (
                       <td className="px-4 py-3.5">
                         <div className="min-w-0">
-                          <p className="text-[13px] font-medium text-card-foreground capitalize truncate">{ticket.customerName}</p>
-                          <p className="text-[11px] text-muted-foreground truncate">{ticket.customerEmail}</p>
+                          <p className="text-[13px] font-medium text-card-foreground capitalize truncate">{ticket.fullName}</p>
+                          <p className="text-[11px] text-muted-foreground truncate">{ticket.email}</p>
                         </div>
                       </td>
                     )}
                     <td className="px-4 py-3.5"><PriorityBadge priority={ticket.priority} /></td>
                     <td className="px-4 py-3.5"><StatusBadge status={ticket.status} /></td>
                     <td className="px-4 py-3.5">
-                      <div className="flex flex-wrap gap-1">
-                        {ticket.tags.slice(0, 2).map(tag => (
-                          <span key={tag} className="inline-flex items-center gap-0.5 rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-accent-foreground">
-                            <Tag className="h-2 w-2" />{tag}
-                          </span>
-                        ))}
-                        {ticket.tags.length > 2 && <span className="text-[10px] text-muted-foreground">+{ticket.tags.length - 2}</span>}
-                      </div>
+                      <span className="text-xs text-muted-foreground">{ticket.industry}</span>
                     </td>
-                    <td className="px-4 py-3.5">
-                      {['Resolved', 'Closed'].includes(ticket.status)
-                        ? <span className="text-xs text-muted-foreground">—</span>
-                        : <SLACountdown deadline={ticket.slaDeadline} compact />}
-                    </td>
-                    <td className="px-4 py-3.5 text-xs text-muted-foreground whitespace-nowrap">{formatDate(ticket.updatedAt)}</td>
+                    <td className="px-4 py-3.5 text-xs text-muted-foreground whitespace-nowrap">{formatDate(ticket.createdAt)}</td>
                     <td className="px-4 py-3.5">
                       <button
                         onClick={(e) => { e.preventDefault(); setDeleteConfirm(ticket.id); }}
@@ -171,7 +164,7 @@ const TicketsList = () => {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 9 : 8} className="px-4 py-16 text-center text-muted-foreground">No tickets found matching your filters.</td>
+                  <td colSpan={isAdmin ? 8 : 7} className="px-4 py-16 text-center text-muted-foreground">No tickets found matching your filters.</td>
                 </tr>
               )}
             </tbody>
@@ -190,8 +183,8 @@ const TicketsList = () => {
             <div className="mt-6 flex justify-end gap-2.5">
               <button onClick={() => setDeleteConfirm(null)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent">Cancel</button>
               <button
-                onClick={() => {
-                  deleteTicket(deleteConfirm, user?.name);
+                onClick={async () => {
+                  await deleteTicket(deleteConfirm, user?.name);
                   toast.success('Ticket deleted successfully');
                   setDeleteConfirm(null);
                 }}

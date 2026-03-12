@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTickets } from '@/contexts/TicketContext';
 import { TicketPriority } from '@/types';
 import { toast } from 'sonner';
-import { Send, Info, Paperclip, X, FileText } from 'lucide-react';
+import { Send, Info, Paperclip, X, FileText, Loader } from 'lucide-react';
 
 const PRIORITIES: TicketPriority[] = ['Low', 'Medium', 'High', 'Critical'];
 
@@ -32,29 +32,39 @@ const CreateTicket = () => {
   const [customerPhone, setCustomerPhone] = useState(user?.phone || '');
   const [customerLocation, setCustomerLocation] = useState('');
   const [industry, setIndustry] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!priority || !subject.trim() || !description.trim() || !customerName.trim() || !customerEmail.trim()) {
       toast.error('Please fill in all required fields');
       return;
     }
-    const attachmentNames = attachments.map(f => f.name).join(', ');
-    const ticket = addTicket({
-      subject,
-      description,
-      priority: priority as TicketPriority,
-      createdBy: user?.id || '',
-      company: user?.company || '',
-      customerName,
-      customerEmail,
-      customerPhone,
-      customerLocation,
-      industry,
-      attachment: attachmentNames || undefined,
-    });
-    toast.success(`Ticket ${ticket.id} created successfully!`);
-    navigate('/tickets');
+
+    setIsSubmitting(true);
+    try {
+      const attachmentNames = attachments.map(f => f.name).join(', ');
+      const ticket = await addTicket({
+        subject,
+        description,
+        priority: priority as TicketPriority,
+        createdBy: user?.id || '',
+        company: user?.company || '',
+        fullName: customerName,
+        email: customerEmail,
+        phone: customerPhone,
+        location: customerLocation,
+        industry,
+        attachment: attachmentNames || undefined,
+      });
+
+      if (ticket) {
+        toast.success(`Ticket ${ticket.ticketId} created successfully!`);
+        navigate('/tickets');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -160,12 +170,21 @@ const CreateTicket = () => {
         </div>
 
         <div className="flex justify-end gap-3 pt-3 border-t border-border">
-          <button type="button" onClick={() => navigate('/tickets')} className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent">
+          <button type="button" onClick={() => navigate('/tickets')} disabled={isSubmitting} className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed">
             Cancel
           </button>
-          <button type="submit" className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-all hover:bg-primary/90 shadow-primary-glow">
-            <Send className="h-4 w-4" />
-            Submit Ticket
+          <button type="submit" disabled={isSubmitting} className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-all hover:bg-primary/90 shadow-primary-glow disabled:opacity-50 disabled:cursor-not-allowed">
+            {isSubmitting ? (
+              <>
+                <Loader className="h-4 w-4 animate-spin" />
+                Creating...
+              </>
+            ) : (
+              <>
+                <Send className="h-4 w-4" />
+                Submit Ticket
+              </>
+            )}
           </button>
         </div>
       </form>
