@@ -6,9 +6,11 @@ export interface FirestoreUser {
   uid: string;
   email: string;
   name: string;
+  fullName?: string;
   role: 'admin' | 'customer';
   status: 'active' | 'disabled';
   createdAt: number;
+  createdBy?: string;
   updatedAt: number;
   syncedWithAuth?: boolean;
 }

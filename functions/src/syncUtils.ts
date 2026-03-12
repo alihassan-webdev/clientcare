@@ -85,16 +85,20 @@ export async function recordSync(
  */
 export async function createFirestoreUser(
   db: admin.firestore.Firestore,
-  authUser: admin.auth.UserRecord
+  authUser: admin.auth.UserRecord,
+  createdBy?: string
 ): Promise<void> {
   try {
+    const displayName = authUser.displayName || authUser.email?.split('@')[0] || 'User';
     const userData: FirestoreUser = {
       uid: authUser.uid,
       email: authUser.email || '',
-      name: authUser.displayName || authUser.email?.split('@')[0] || 'User',
+      name: displayName,
+      fullName: displayName,
       role: 'customer',
       status: 'active',
       createdAt: Date.now(),
+      createdBy: createdBy || 'system',
       updatedAt: Date.now(),
       syncedWithAuth: true,
     };
