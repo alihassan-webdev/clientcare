@@ -1,79 +1,96 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions to check user roles
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
-    function isAdmin() {
-      return isAuthenticated() && 
-             exists(/databases/{database}/documents/users/$(request.auth.uid)) &&
-             get(/databases/{database}/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    // Users collection - main data store for user synchronization
-    match /users/{userId} {
-      // Read: Admins can read all users, customers can only read their own profile
-      allow read: if isAdmin() || isOwner(userId);
+    
+    // ============================================================
+    // USERS COLLECTION - Core user data with status management
+    // ============================================================
+    match /users/{uid} {
       
-      // Create: Only Cloud Functions (service account) and admins can create
-      // Cloud Functions use special authentication that bypasses these rules
-      allow create: if isAdmin() || 
-                       (isAuthenticated() && request.auth.token.admin == true);
+      // Read Rules
+      allow read: if 
+        // Users can read their own document
+        request.auth.uid == uid ||
+        // Admins can read all users
+        request.auth.token.admin == true ||
+        // Service account / Cloud Functions can read for syncing
+        request.auth == null;
       
-      // Update: Only admins can update user records
-      // Also allow self-update of certain fields (name, phone, company)
-      allow update: if isAdmin() ||
-                       (isOwner(userId) && 
-                        // Allow users to update only specific fields
-                        request.resource.data.diff(resource.data).affectedKeys()
-                          .hasAll(['name', 'phone', 'company']) &&
-                        // Ensure users cannot change their own role
-                        request.resource.data.role == resource.data.role &&
-                        // Ensure users cannot change uid or email
-                        request.resource.data.uid == resource.data.uid &&
-                        request.resource.data.email == resource.data.email);
+      // Create Rules - Only Cloud Functions or explicit admin panel call
+      allow create: if 
+        // Cloud Functions (service account) can create
+        request.auth == null ||
+        // Admins can create via API
+        request.auth.token.admin == true ||
+        // Validate required fields when creating
+        hasAllRequiredFields(request.resource.data);
       
-      // Delete: Only Cloud Functions (service account) and admins can delete
-      allow delete: if isAdmin() || 
-                       (isAuthenticated() && request.auth.token.admin == true);
-
-      // Firestore fields validation
-      match /{document=**} {
-        allow read, write: if false;
-      }
+      // Update Rules - Differentiated by source
+      allow update: if 
+        // Cloud Functions can update any field (sync operations)
+        request.auth == null ||
+        // Admins can update any field
+        request.auth.token.admin == true ||
+        // Users can update only safe fields in their own document
+        (request.auth.uid == uid && isAllowedSelfUpdate(resource.data, request.resource.data));
+      
+      // Delete Rules
+      allow delete: if 
+        // Cloud Functions can delete (cleanup)
+        request.auth == null ||
+        // Admins can delete
+        request.auth.token.admin == true;
     }
-
-    // Sync metadata collection - internal use only
-    // Used by Cloud Functions to track sync operations and prevent infinite loops
-    match /syncMetadata/{userId} {
-      // Only Cloud Functions should access this collection
-      allow read, write: if isAuthenticated() && request.auth.token.admin == true;
+    
+    // ============================================================
+    // SYNC METADATA COLLECTION - Internal use only
+    // ============================================================
+    match /syncMetadata/{uid} {
+      // Only Cloud Functions can access
+      allow read, write, delete: if request.auth == null;
     }
-
-    // Tickets collection - for ticket management system
-    match /tickets/{document=**} {
-      // Admins and ticket owners can read
-      allow read: if isAdmin() || isOwner(resource.data.userId);
-      
-      // Admins and ticket creators can create
-      allow create: if isAdmin() || isAuthenticated();
-      
-      // Admins and ticket owners can update
-      allow update: if isAdmin() || isOwner(resource.data.userId);
-      
-      // Admins can delete
-      allow delete: if isAdmin();
-    }
-
-    // Default deny all other collections
+    
+    // ============================================================
+    // DEFAULT - Block all other collections
+    // ============================================================
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write, delete: if false;
     }
+  }
+  
+  // ============================================================
+  // HELPER FUNCTIONS
+  // ============================================================
+  
+  // Check if all required fields are present for user creation
+  function hasAllRequiredFields(data) {
+    let requiredFields = ['uid', 'email', 'name', 'role', 'status', 'createdAt', 'updatedAt'];
+    return data.keys().hasAll(requiredFields) &&
+           data.uid is string &&
+           data.email is string &&
+           data.name is string &&
+           data.role in ['admin', 'customer'] &&
+           data.status in ['active', 'disabled'] &&
+           data.createdAt is number &&
+           data.updatedAt is number;
+  }
+  
+  // Check if a user is allowed to update their own document
+  // They can only update: name, email, phone, company
+  // They CANNOT update: role, status, createdAt, updatedAt, uid
+  function isAllowedSelfUpdate(oldData, newData) {
+    let changedKeys = newData.diff(oldData).affectedKeys();
+    let restrictedKeys = ['role', 'status', 'createdAt', 'updatedAt', 'uid', 'syncedWithAuth'];
+    
+    // Ensure no restricted fields are being modified
+    let hasRestrictedChanges = changedKeys.hasAny(restrictedKeys);
+    
+    // Only allow if no restricted fields are changed
+    return !hasRestrictedChanges &&
+           // Validate field types for allowed updates
+           (!newData.diff(oldData).affectedKeys().hasAny(['name']) || newData.name is string) &&
+           (!newData.diff(oldData).affectedKeys().hasAny(['email']) || newData.email is string) &&
+           (!newData.diff(oldData).affectedKeys().hasAny(['phone']) || newData.phone is string) &&
+           (!newData.diff(oldData).affectedKeys().hasAny(['company']) || newData.company is string);
   }
 }

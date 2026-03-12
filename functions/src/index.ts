@@ -20,6 +20,8 @@ import {
   deleteAuthUser,
   isProtectedUser,
   getFirestoreUser,
+  disableUser,
+  enableUser,
 } from './syncUtils.js';
 import { logger } from './logger.js';
 import { CONFIG } from './config.js';
@@ -342,9 +344,34 @@ export const onFirestoreUserUpdated = functions.firestore
   });
 
 /**
+ * Helper function to check if user is admin
+ * Checks both custom claims and Firestore role
+ */
+async function isUserAdmin(auth: admin.auth.Auth, db: admin.firestore.Firestore, uid: string): Promise<boolean> {
+  try {
+    // Check custom claims first (faster)
+    const user = await auth.getUser(uid);
+    if (user.customClaims?.admin === true) {
+      return true;
+    }
+
+    // Fallback: check Firestore role
+    const userDoc = await db.collection(CONFIG.USERS_COLLECTION).doc(uid).get();
+    return userDoc.exists && userDoc.data()?.role === 'admin';
+  } catch (error) {
+    logger.warn('Error checking admin status', {
+      userId: uid,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
  * OPTIONAL: Manual Sync Callable Function
  * Can be called from the admin panel to manually sync all users
  * Useful for fixing sync issues or initial setup
+ * REQUIRES: Admin role
  */
 export const syncAllUsers = functions.https.onCall(
   async (data, context) => {
@@ -356,8 +383,15 @@ export const syncAllUsers = functions.https.onCall(
       );
     }
 
-    // Check if caller is admin (optional - implement your own check)
-    // For now, we'll allow authenticated users
+    // Check if caller is admin
+    const adminStatus = await isUserAdmin(auth, db, context.auth.uid);
+    if (!adminStatus) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Only admins can manually sync users'
+      );
+    }
+
     const functionContext = {
       functionName: 'syncAllUsers',
       callerId: context.auth.uid,
@@ -423,6 +457,7 @@ export const syncAllUsers = functions.https.onCall(
  * OPTIONAL: Secure Delete User Callable Function
  * Called from admin panel to securely delete a user from both Auth and Firestore
  * This ensures both systems stay synchronized
+ * REQUIRES: Admin role
  */
 export const deleteUserSecure = functions.https.onCall(
   async (data, context) => {
@@ -431,6 +466,15 @@ export const deleteUserSecure = functions.https.onCall(
       throw new functions.https.HttpsError(
         'unauthenticated',
         'User must be authenticated to delete users'
+      );
+    }
+
+    // Check if caller is admin
+    const adminStatus = await isUserAdmin(auth, db, context.auth.uid);
+    if (!adminStatus) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Only admins can delete users'
       );
     }
 
@@ -499,6 +543,168 @@ export const deleteUserSecure = functions.https.onCall(
       throw new functions.https.HttpsError(
         'internal',
         'Error deleting user'
+      );
+    }
+  }
+);
+
+/**
+ * OPTIONAL: Disable User Callable Function
+ * Disables a user in both Firebase Auth and Firestore
+ * Disabled users cannot log in
+ * REQUIRES: Admin role
+ */
+export const disableUserSecure = functions.https.onCall(
+  async (data, context) => {
+    // Check if caller is authenticated
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        'unauthenticated',
+        'User must be authenticated to disable users'
+      );
+    }
+
+    // Check if caller is admin
+    const adminStatus = await isUserAdmin(auth, db, context.auth.uid);
+    if (!adminStatus) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Only admins can disable users'
+      );
+    }
+
+    const userId = data.userId as string;
+
+    if (!userId) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'userId is required'
+      );
+    }
+
+    // Prevent self-disabling
+    if (userId === context.auth.uid) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'You cannot disable your own account'
+      );
+    }
+
+    const functionContext = {
+      functionName: 'disableUserSecure',
+      userId,
+      callerId: context.auth.uid,
+      timestamp: Date.now(),
+    };
+
+    try {
+      logger.info('Secure user disable initiated', functionContext);
+
+      // Check if user is protected
+      if (isProtectedUser(userId)) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'This account is protected and cannot be disabled'
+        );
+      }
+
+      // Disable user in both Auth and Firestore
+      await disableUser(auth, db, userId);
+
+      logger.info('User successfully disabled', functionContext);
+      return {
+        status: 'success',
+        message: 'User disabled successfully',
+        userId,
+      };
+    } catch (error) {
+      if (error instanceof functions.https.HttpsError) {
+        throw error;
+      }
+
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      logger.error('Error in disableUserSecure', errorMessage, functionContext);
+      throw new functions.https.HttpsError(
+        'internal',
+        'Error disabling user'
+      );
+    }
+  }
+);
+
+/**
+ * OPTIONAL: Enable User Callable Function
+ * Enables a user in both Firebase Auth and Firestore
+ * Enabled users can log in again
+ * REQUIRES: Admin role
+ */
+export const enableUserSecure = functions.https.onCall(
+  async (data, context) => {
+    // Check if caller is authenticated
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        'unauthenticated',
+        'User must be authenticated to enable users'
+      );
+    }
+
+    // Check if caller is admin
+    const adminStatus = await isUserAdmin(auth, db, context.auth.uid);
+    if (!adminStatus) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Only admins can enable users'
+      );
+    }
+
+    const userId = data.userId as string;
+
+    if (!userId) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'userId is required'
+      );
+    }
+
+    const functionContext = {
+      functionName: 'enableUserSecure',
+      userId,
+      callerId: context.auth.uid,
+      timestamp: Date.now(),
+    };
+
+    try {
+      logger.info('Secure user enable initiated', functionContext);
+
+      // Check if user is protected
+      if (isProtectedUser(userId)) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'This account is protected and cannot be enabled (should already be enabled)'
+        );
+      }
+
+      // Enable user in both Auth and Firestore
+      await enableUser(auth, db, userId);
+
+      logger.info('User successfully enabled', functionContext);
+      return {
+        status: 'success',
+        message: 'User enabled successfully',
+        userId,
+      };
+    } catch (error) {
+      if (error instanceof functions.https.HttpsError) {
+        throw error;
+      }
+
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      logger.error('Error in enableUserSecure', errorMessage, functionContext);
+      throw new functions.https.HttpsError(
+        'internal',
+        'Error enabling user'
       );
     }
   }

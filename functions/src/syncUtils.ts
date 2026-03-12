@@ -93,6 +93,7 @@ export async function createFirestoreUser(
       email: authUser.email || '',
       name: authUser.displayName || authUser.email?.split('@')[0] || 'User',
       role: 'customer',
+      status: 'active',
       createdAt: Date.now(),
       updatedAt: Date.now(),
       syncedWithAuth: true,
@@ -293,5 +294,63 @@ export async function getFirestoreUser(
       { userId }
     );
     return null;
+  }
+}
+
+/**
+ * Disable a user in both Auth and Firestore
+ */
+export async function disableUser(
+  auth: admin.auth.Auth,
+  db: admin.firestore.Firestore,
+  userId: string
+): Promise<void> {
+  try {
+    // Disable in Firebase Auth
+    await auth.updateUser(userId, { disabled: true });
+    logger.info('Disabled Auth user', { userId });
+
+    // Update status in Firestore
+    await updateFirestoreUser(db, userId, {
+      status: 'disabled',
+    });
+
+    logger.info('User disabled in both Auth and Firestore', { userId });
+  } catch (error) {
+    logger.error(
+      'Error disabling user',
+      error instanceof Error ? error.message : String(error),
+      { userId }
+    );
+    throw error;
+  }
+}
+
+/**
+ * Enable a user in both Auth and Firestore
+ */
+export async function enableUser(
+  auth: admin.auth.Auth,
+  db: admin.firestore.Firestore,
+  userId: string
+): Promise<void> {
+  try {
+    // Enable in Firebase Auth
+    await auth.updateUser(userId, { disabled: false });
+    logger.info('Enabled Auth user', { userId });
+
+    // Update status in Firestore
+    await updateFirestoreUser(db, userId, {
+      status: 'active',
+    });
+
+    logger.info('User enabled in both Auth and Firestore', { userId });
+  } catch (error) {
+    logger.error(
+      'Error enabling user',
+      error instanceof Error ? error.message : String(error),
+      { userId }
+    );
+    throw error;
   }
 }

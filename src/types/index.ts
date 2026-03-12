@@ -13,6 +13,7 @@ export interface User {
   phone: string;
   role: UserRole;
   company: string;
+  status?: 'active' | 'disabled';
   password?: string;
   registeredAt?: string;
   isProtected?: boolean;
