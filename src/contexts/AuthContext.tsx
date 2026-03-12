@@ -259,7 +259,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         : error?.message || 'Failed to add user';
       throw new Error(errorMessage);
     }
-  }, [syncUsersFromFirestore]);
+  }, []);
 
   const logout = useCallback(async () => {
     try {
@@ -335,7 +335,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // Real-time listener will automatically sync the latest data from Firestore
-  }, [user?.id, user?.role, logout, users, syncUsersFromFirestore]);
+  }, [user?.id, user?.role, logout, users]);
 
   const deleteUser = useCallback(async (id: string) => {
     try {
