@@ -3,7 +3,7 @@ import { User, UserRole } from '@/types';
 import { mockUsers } from '@/data/mockData';
 import { auth } from '@/firebase';
 import { signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, deleteUser as firebaseDeleteUser } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, query, getDocs, setDoc, doc, deleteDoc, updateDoc, Unsubscribe } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, query, getDocs, setDoc, doc, deleteDoc, updateDoc, Unsubscribe, where } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
 interface AuthContextType {
@@ -161,13 +161,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       // Authenticate with Firebase - this is the primary source of truth
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const uid = userCredential.user.uid;
+
+      // Check if user is disabled in Firestore
+      try {
+        const db = getFirestore();
+        const userDocRef = doc(db, 'users', uid);
+        const userDocSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', uid)));
+
+        if (!userDocSnap.empty) {
+          const userData = userDocSnap.docs[0].data();
+          if (userData.status === 'disabled') {
+            // User is disabled, sign them out immediately
+            await signOut(auth);
+            throw new Error('Your account has been disabled. Contact the administrator.');
+          }
+        }
+      } catch (firestoreError: any) {
+        // If it's our custom error about disabled status, rethrow it
+        if (firestoreError?.message?.includes('disabled')) {
+          throw firestoreError;
+        }
+        // Log other Firestore errors but continue with login
+        console.warn('Could not verify user status in Firestore:', firestoreError);
+      }
 
       // Check if user exists in local database for role/profile info
       let existingUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
 
       // If user doesn't exist locally, create a user object from Firebase with admin role
       const userObj: User = existingUser || {
-        id: userCredential.user.uid,
+        id: uid,
         name: email.split('@')[0],
         email: userCredential.user.email || email,
         phone: '',
@@ -205,6 +229,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         errorMessage = 'This account has been disabled';
       } else if (error?.code === 'auth/too-many-requests') {
         errorMessage = 'Too many login attempts. Please try again later';
+      } else if (error?.message?.includes('disabled')) {
+        errorMessage = error.message;
       } else {
         errorMessage = error?.message || 'Login failed. Please try again.';
       }
@@ -226,12 +252,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await setDoc(doc(db, 'users', uid), {
           uid,
           name,
+          fullName: name,
           email,
           phone,
           company,
           role: userRole,
           status: 'active',
           createdAt: Date.now(),
+          createdBy: user?.email || 'admin',
           updatedAt: Date.now(),
           syncedWithAuth: true,
         });
@@ -264,7 +292,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         : error?.message || 'Failed to add user';
       throw new Error(errorMessage);
     }
-  }, []);
+  }, [user?.email]);
 
   const logout = useCallback(async () => {
     try {
