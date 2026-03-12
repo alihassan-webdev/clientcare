@@ -96,19 +96,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Sync on mount
+  // Sync on mount only
   useEffect(() => {
     syncUsersFromFirestore();
-  }, [syncUsersFromFirestore]);
-
-  // Periodic sync every 3 seconds to pick up Firestore changes
-  useEffect(() => {
-    const interval = setInterval(() => {
-      syncUsersFromFirestore();
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [syncUsersFromFirestore]);
+  }, []);
 
   // Initialize localStorage with mock data if empty
   useEffect(() => {
