@@ -49,7 +49,29 @@ service cloud.firestore {
       // Only Cloud Functions can access
       allow read, write, delete: if request.auth == null;
     }
-    
+
+    // ============================================================
+    // TICKETS COLLECTION - Support ticket management
+    // ============================================================
+    match /tickets/{ticketId} {
+      // Create: Authenticated users can create tickets with required fields
+      allow create: if
+        request.auth != null &&
+        hasAllTicketRequiredFields(request.resource.data);
+
+      // Read: Authenticated users can read all tickets
+      // (Restrict to own tickets or admin-only in production)
+      allow read: if request.auth != null;
+
+      // Update: Authenticated users can update tickets
+      // (Restrict to owner or admin-only in production)
+      allow update: if request.auth != null;
+
+      // Delete: Authenticated users can delete tickets
+      // (Restrict to admin-only in production)
+      allow delete: if request.auth != null;
+    }
+
     // ============================================================
     // DEFAULT - Block all other collections
     // ============================================================
@@ -61,7 +83,7 @@ service cloud.firestore {
   // ============================================================
   // HELPER FUNCTIONS
   // ============================================================
-  
+
   // Check if all required fields are present for user creation
   function hasAllRequiredFields(data) {
     let requiredFields = ['uid', 'email', 'name', 'role', 'status', 'createdAt', 'updatedAt'];
@@ -73,6 +95,17 @@ service cloud.firestore {
            data.status in ['active', 'disabled'] &&
            data.createdAt is number &&
            data.updatedAt is number;
+  }
+
+  // Check if all required fields are present for ticket creation
+  function hasAllTicketRequiredFields(data) {
+    let requiredFields = ['subject', 'description', 'priority', 'email', 'fullName'];
+    return data.keys().hasAll(requiredFields) &&
+           data.subject is string &&
+           data.description is string &&
+           data.priority in ['Low', 'Medium', 'High', 'Critical'] &&
+           data.email is string &&
+           data.fullName is string;
   }
   
   // Check if a user is allowed to update their own document

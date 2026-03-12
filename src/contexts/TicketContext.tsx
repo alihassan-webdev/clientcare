@@ -74,9 +74,42 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const addTicket = useCallback(async (data: { subject: string; description: string; priority: TicketPriority; createdBy: string; company?: string; fullName: string; email: string; phone: string; location: string; industry: string; attachment?: string }) => {
     try {
-      const now = new Date().toISOString();
-      const ticketsCollection = collection(db, 'tickets');
+      // Step 1: Log incoming form data
+      console.log('=== TICKET CREATION STARTED ===');
+      console.log('1. Form data received:', {
+        fullName: data.fullName,
+        email: data.email,
+        phone: data.phone,
+        location: data.location,
+        industry: data.industry,
+        subject: data.subject,
+        description: data.description,
+        priority: data.priority,
+        createdBy: data.createdBy,
+        company: data.company,
+      });
 
+      // Step 2: Validate required fields
+      const requiredFields = ['fullName', 'email', 'subject', 'description', 'priority'];
+      const missingFields = requiredFields.filter(field => !data[field as keyof typeof data]);
+      if (missingFields.length > 0) {
+        console.error('Missing required fields:', missingFields);
+        throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+      }
+      console.log('2. Required fields validation: PASSED');
+
+      // Step 3: Verify Firestore is initialized
+      console.log('3. Firestore DB initialized:', !!db);
+      if (!db) {
+        throw new Error('Firestore database is not initialized');
+      }
+
+      // Step 4: Create tickets collection reference
+      const ticketsCollection = collection(db, 'tickets');
+      console.log('4. Tickets collection reference created');
+
+      // Step 5: Build ticket data object
+      const now = new Date().toISOString();
       const ticketData: Omit<Ticket, 'id'> = {
         ticketId: '', // Will be set after document creation
         fullName: data.fullName,
@@ -95,21 +128,42 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         attachment: data.attachment,
         messages: [],
         timeline: [
-          { 
-            id: `tl-${Date.now()}`, 
-            type: 'created', 
-            description: `Ticket created by ${data.fullName}`, 
-            timestamp: now 
+          {
+            id: `tl-${Date.now()}`,
+            type: 'created',
+            description: `Ticket created by ${data.fullName}`,
+            timestamp: now
           },
         ],
         tags: [],
       };
 
+      console.log('5. Ticket data prepared:', ticketData);
+      console.log('   - Priority value type:', typeof ticketData.priority);
+      console.log('   - Priority value:', ticketData.priority);
+      console.log('   - Allowed values: "Low", "Medium", "High", "Critical"');
+
+      // Step 6: Verify priority matches allowed values
+      const allowedPriorities = ['Low', 'Medium', 'High', 'Critical'];
+      if (!allowedPriorities.includes(ticketData.priority)) {
+        console.warn('Priority mismatch - converting if needed:', {
+          received: ticketData.priority,
+          allowed: allowedPriorities,
+        });
+      }
+
+      // Step 7: Attempt to write to Firestore
+      console.log('6. Attempting to write ticket to Firestore collection: "tickets"');
       const docRef = await addDoc(ticketsCollection, ticketData);
-      
-      // Update the document with the ticketId based on document ID
+      console.log('7. Ticket created successfully in Firestore!');
+      console.log('   - Document ID:', docRef.id);
+      console.log('   - Collection path: "tickets"');
+
+      // Step 8: Update document with generated ticketId
+      console.log('8. Updating document with generated ticket ID...');
       const ticketId = `TCK-${docRef.id.substring(0, 8).toUpperCase()}`;
       await updateDoc(docRef, { ticketId });
+      console.log('9. Ticket ID updated successfully:', ticketId);
 
       const newTicket: Ticket = {
         id: docRef.id,
@@ -118,10 +172,36 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       };
 
       addActivityLog({ type: 'ticket_created', description: `Ticket ${ticketId} created`, actor: data.fullName });
+      console.log('=== TICKET CREATION COMPLETED ===');
       return newTicket;
     } catch (error) {
-      console.error('Error adding ticket:', error);
-      toast.error('Failed to create ticket');
+      console.error('=== TICKET CREATION FAILED ===');
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorCode = (error as any)?.code;
+
+      console.error('ERROR MESSAGE:', errorMessage);
+      console.error('ERROR CODE:', errorCode);
+      console.error('FULL ERROR OBJECT:', error);
+
+      // Provide specific error context
+      if (errorCode === 'permission-denied') {
+        console.error('❌ PERMISSION DENIED: Your Firebase security rules are rejecting the write.');
+        console.error('   - Check if you are authenticated');
+        console.error('   - Check if your priority value matches "Low", "Medium", "High", or "Critical" exactly');
+        console.error('   - Check if all required fields are present: fullName, email, subject, description, priority');
+      } else if (errorCode === 'not-found') {
+        console.error('❌ DATABASE NOT FOUND: Firestore database connection issue.');
+      } else if (errorCode === 'unauthenticated') {
+        console.error('❌ NOT AUTHENTICATED: You must be logged in to create tickets.');
+      }
+
+      console.error('Full error details:', {
+        message: errorMessage,
+        code: errorCode,
+        timestamp: new Date().toISOString(),
+      });
+
+      toast.error('Failed to create ticket. Please check the console for details.');
       return null;
     }
   }, [db, addActivityLog]);
