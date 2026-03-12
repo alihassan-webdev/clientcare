@@ -63,12 +63,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const unsubscribe = onSnapshot(
         query(usersCollection),
         (snapshot) => {
-          const firestoreUsers: User[] = [];
+          const firestoreUsersMap = new Map<string, User>();
 
           snapshot.forEach((doc) => {
             const data = doc.data();
-            firestoreUsers.push({
-              id: data.uid || doc.id,
+            const userId = data.uid || doc.id;
+
+            // Use Map to deduplicate by uid
+            firestoreUsersMap.set(userId, {
+              id: userId,
               name: data.name || '',
               email: data.email || '',
               phone: data.phone || '',
@@ -78,6 +81,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               registeredAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
             });
           });
+
+          // Convert map back to array
+          const firestoreUsers = Array.from(firestoreUsersMap.values());
 
           // Also keep protected accounts from localStorage
           const storedUsers = localStorage.getItem('cc_users');
