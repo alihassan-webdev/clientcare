@@ -1,29 +1,43 @@
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTickets } from '@/contexts/TicketContext';
 import { StatusBadge } from '@/components/StatusBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { SLACountdown } from '@/components/SLACountdown';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { ClipboardList, AlertTriangle, TrendingUp, Clock, ArrowUpRight, Shield, Users, CheckCircle, Activity } from 'lucide-react';
+import { ClipboardList, AlertTriangle, TrendingUp, Clock, ArrowUpRight, Shield, Users, CheckCircle, Activity, ChevronDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { TicketStatus } from '@/types';
 
 const PRIORITY_COLORS = ['hsl(0,72%,50%)', 'hsl(25,95%,53%)', 'hsl(45,93%,47%)', 'hsl(152,60%,42%)'];
 
 const AdminDashboard = () => {
   const { user, users } = useAuth();
-  const { tickets, activityLogs } = useTickets();
+  const { tickets, activityLogs, changeStatus } = useTickets();
+  const [expandedTicket, setExpandedTicket] = useState<string | null>(null);
 
   if (!user) return null;
 
-  const openTickets = tickets.filter(t => t.status === 'Open');
-  const inProgressTickets = tickets.filter(t => t.status === 'In Progress');
-  const resolvedTickets = tickets.filter(t => t.status === 'Resolved');
-  const overdueTickets = tickets.filter(t => t.isOverdue || (new Date(t.slaDeadline).getTime() < Date.now() && t.status !== 'Resolved'));
+  const handleStatusChange = async (ticketId: string, newStatus: TicketStatus) => {
+    await changeStatus(ticketId, newStatus, user.name);
+    setExpandedTicket(null);
+  };
+
+  const openTickets = tickets.filter(t => t.status === 'open');
+  const inProgressTickets = tickets.filter(t => t.status === 'in_progress');
+  const resolvedTickets = tickets.filter(t => t.status === 'resolved');
+  const closedTickets = tickets.filter(t => t.status === 'closed');
+  const overdueTickets = tickets.filter(t => (t.slaDeadline && new Date(t.slaDeadline).getTime() < Date.now() && t.status !== 'resolved' && t.status !== 'closed'));
   const totalCustomers = users.filter(u => u.role === 'customer').length;
 
-  const statusCounts = ['Open', 'In Progress', 'Resolved'].map(s => ({
-    name: s,
-    count: tickets.filter(t => t.status === s).length,
+  const statusCounts = [
+    { name: 'Open', value: 'open' },
+    { name: 'In Progress', value: 'in_progress' },
+    { name: 'Resolved', value: 'resolved' },
+    { name: 'Closed', value: 'closed' },
+  ].map(s => ({
+    name: s.name,
+    count: tickets.filter(t => t.status === s.value).length,
   })).filter(d => d.count > 0);
 
   const priorityCounts = ['Critical', 'High', 'Medium', 'Low'].map((p, i) => ({
@@ -42,11 +56,11 @@ const AdminDashboard = () => {
 
   const cards = [
     { icon: ClipboardList, label: 'Total Tickets', value: tickets.length, color: 'text-primary', bg: 'bg-primary/8' },
-    { icon: Clock, label: 'Open Tickets', value: openTickets.length, color: 'text-blue-500', bg: 'bg-blue-500/8' },
+    { icon: Clock, label: 'Open', value: openTickets.length, color: 'text-blue-500', bg: 'bg-blue-500/8' },
+    { icon: TrendingUp, label: 'In Progress', value: inProgressTickets.length, color: 'text-orange-500', bg: 'bg-orange-500/8' },
     { icon: CheckCircle, label: 'Resolved', value: resolvedTickets.length, color: 'text-emerald-500', bg: 'bg-emerald-500/8' },
-    { icon: Users, label: 'Total Customers', value: totalCustomers, color: 'text-violet-500', bg: 'bg-violet-500/8' },
     { icon: AlertTriangle, label: 'Overdue', value: overdueTickets.length, color: 'text-destructive', bg: 'bg-destructive/8' },
-    { icon: TrendingUp, label: 'SLA Compliance', value: `${slaCompliance}%`, color: 'text-emerald-500', bg: 'bg-emerald-500/8' },
+    { icon: Users, label: 'Total Customers', value: totalCustomers, color: 'text-violet-500', bg: 'bg-violet-500/8' },
   ];
 
   const formatTime = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -123,23 +137,45 @@ const AdminDashboard = () => {
 
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
         {/* Recent Tickets */}
-        <div className="card-premium overflow-hidden">
+        <div className="card-premium overflow-hidden lg:col-span-2">
           <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-            <h3 className="font-heading text-sm font-semibold text-card-foreground">Recent Tickets</h3>
-            <Link to="/tickets" className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">View all <ArrowUpRight className="h-3 w-3" /></Link>
+            <h3 className="font-heading text-sm font-semibold text-card-foreground">All Tickets</h3>
+            <Link to="/admin/reports" className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">Details <ArrowUpRight className="h-3 w-3" /></Link>
           </div>
-          <div className="divide-y divide-border">
-            {recentTickets.map(ticket => (
-              <Link key={ticket.id} to={`/tickets/${ticket.id}`} className="flex flex-col gap-2 px-5 py-3.5 transition-colors hover:bg-accent/40 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="font-mono text-xs text-muted-foreground shrink-0">{ticket.id}</span>
-                  <span className="text-sm font-medium text-card-foreground truncate">{ticket.subject}</span>
+          <div className="divide-y divide-border overflow-x-auto">
+            <div className="text-xs font-medium text-muted-foreground bg-muted/30 px-5 py-2 grid grid-cols-5 gap-2 sticky top-0 min-w-min">
+              <div>Customer</div>
+              <div>Subject</div>
+              <div>Priority</div>
+              <div>Status</div>
+              <div>Created</div>
+            </div>
+            {tickets.slice(0, 8).map(ticket => (
+              <div key={ticket.id} className="px-5 py-3 border-b border-border grid grid-cols-5 gap-2 min-w-min hover:bg-accent/30">
+                <div className="text-sm font-medium text-card-foreground truncate">{ticket.fullName}</div>
+                <div className="text-sm text-muted-foreground truncate">{ticket.subject}</div>
+                <div><PriorityBadge priority={ticket.priority} /></div>
+                <div className="relative group">
+                  <button className="flex items-center gap-1 text-xs font-medium">
+                    <StatusBadge status={ticket.status} />
+                    <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                  <div className="absolute left-0 top-full mt-1 hidden group-hover:block bg-card border border-border rounded-lg shadow-lg z-20">
+                    {(['open', 'in_progress', 'resolved', 'closed'] as TicketStatus[]).map(status => (
+                      <button
+                        key={status}
+                        onClick={() => handleStatusChange(ticket.id, status)}
+                        className={`block w-full text-left px-3 py-2 text-xs hover:bg-accent first:rounded-t-md last:rounded-b-md ${
+                          ticket.status === status ? 'bg-primary/10 text-primary font-semibold' : 'text-card-foreground'
+                        }`}
+                      >
+                        {status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <StatusBadge status={ticket.status} />
-                  <PriorityBadge priority={ticket.priority} />
-                </div>
-              </Link>
+                <div className="text-xs text-muted-foreground">{new Date(ticket.createdAt).toLocaleDateString()}</div>
+              </div>
             ))}
           </div>
         </div>
@@ -151,7 +187,7 @@ const AdminDashboard = () => {
               <Activity className="h-4 w-4" /> Activity Log
             </h3>
           </div>
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-border max-h-96 overflow-y-auto">
             {recentLogs.map(log => (
               <div key={log.id} className="flex items-center gap-3 px-5 py-3">
                 <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${LOG_COLORS[log.type] || 'bg-muted text-muted-foreground'}`}>

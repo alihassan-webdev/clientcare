@@ -12,7 +12,13 @@ import {
   CheckCircle, Circle, ArrowRightCircle, XCircle, Tag, X, MapPin, Factory, Paperclip, FileText, Trash2,
 } from 'lucide-react';
 
-const STATUSES: TicketStatus[] = ['Open', 'In Progress', 'Resolved'];
+const STATUSES: TicketStatus[] = ['open', 'in_progress', 'resolved', 'closed'];
+const STATUS_LABELS: Record<TicketStatus, string> = {
+  open: 'Open',
+  in_progress: 'In Progress',
+  resolved: 'Resolved',
+  closed: 'Closed',
+};
 const ALL_TAGS: TicketTag[] = ['Bug', 'Billing', 'Technical Issue', 'Account Problem', 'Feature Request', 'General'];
 
 const TIMELINE_ICONS: Record<string, any> = {
@@ -71,21 +77,21 @@ const TicketDetail = () => {
     toast.success(isInternal ? 'Internal note added' : 'Reply sent');
   };
 
-  const handleStatusChange = (status: TicketStatus) => {
-    changeStatus(ticket.id, status, user?.name);
-    toast.success(`Status changed to ${status}`);
+  const handleStatusChange = async (status: TicketStatus) => {
+    await changeStatus(ticket.id, status, user?.name);
+    toast.success(`Status changed to ${STATUS_LABELS[status]}`);
   };
 
-  const confirmStatusChange = () => {
+  const confirmStatusChange = async () => {
     if (showConfirm) {
-      changeStatus(ticket.id, showConfirm, user?.name);
-      toast.success(`Ticket ${showConfirm.toLowerCase()}`);
+      await changeStatus(ticket.id, showConfirm, user?.name);
+      toast.success(`Ticket status updated`);
       setShowConfirm(null);
     }
   };
 
-  const visibleMessages = ticket.messages.filter(m => isAdmin || !m.isInternal);
-  const isClosed = ticket.status === 'Resolved';
+  const visibleMessages = (ticket.messages || []).filter(m => isAdmin || !m.isInternal);
+  const isClosed = ticket.status === 'resolved' || ticket.status === 'closed';
 
   const formatTime = (iso: string) => new Date(iso).toLocaleString('en-US', {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -120,8 +126,8 @@ const TicketDetail = () => {
             <div className="mt-6 flex justify-end gap-2.5">
               <button onClick={() => setShowDeleteConfirm(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent">Cancel</button>
               <button
-                onClick={() => {
-                  deleteTicket(ticket.id, user?.name);
+                onClick={async () => {
+                  await deleteTicket(ticket.id, user?.name);
                   toast.success('Ticket deleted successfully');
                   navigate('/tickets');
                 }}
@@ -141,10 +147,10 @@ const TicketDetail = () => {
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-sm text-muted-foreground">{ticket.id}</span>
+            <span className="font-mono text-sm text-muted-foreground">{ticket.ticketId}</span>
             <StatusBadge status={ticket.status} />
             <PriorityBadge priority={ticket.priority} />
-            {ticket.tags.map(tag => (
+            {(ticket.tags || []).map(tag => (
               <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-0.5 text-[11px] font-medium text-accent-foreground">
                 <Tag className="h-2.5 w-2.5" />{tag}
                 {isAdmin && (
@@ -157,9 +163,11 @@ const TicketDetail = () => {
           </div>
           <h1 className="mt-1 font-heading text-lg sm:text-xl font-bold tracking-tight text-foreground break-words">{ticket.subject}</h1>
         </div>
-        <div className="self-start">
-          <SLACountdown deadline={ticket.slaDeadline} />
-        </div>
+        {ticket.slaDeadline && (
+          <div className="self-start">
+            <SLACountdown deadline={ticket.slaDeadline} />
+          </div>
+        )}
       </div>
 
       {/* Content */}
@@ -172,31 +180,33 @@ const TicketDetail = () => {
           </div>
 
           {/* Timeline */}
-          <div className="card-premium p-5">
-            <h3 className="mb-4 font-heading text-sm font-semibold text-card-foreground flex items-center gap-2">
-              <Clock className="h-4 w-4" /> Status Timeline
-            </h3>
-            <div className="relative">
-              <div className="absolute left-[15px] top-2 bottom-2 w-px bg-border" />
-              <div className="space-y-4">
-                {ticket.timeline.map((event, idx) => {
-                  const Icon = TIMELINE_ICONS[event.type] || Circle;
-                  const colorClass = TIMELINE_COLORS[event.type] || 'text-muted-foreground bg-muted';
-                  return (
-                    <div key={event.id} className="relative flex gap-3 pl-0">
-                      <div className={`relative z-10 flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full ${colorClass}`}>
-                        <Icon className="h-3.5 w-3.5" />
+          {(ticket.timeline && ticket.timeline.length > 0) && (
+            <div className="card-premium p-5">
+              <h3 className="mb-4 font-heading text-sm font-semibold text-card-foreground flex items-center gap-2">
+                <Clock className="h-4 w-4" /> Status Timeline
+              </h3>
+              <div className="relative">
+                <div className="absolute left-[15px] top-2 bottom-2 w-px bg-border" />
+                <div className="space-y-4">
+                  {ticket.timeline.map((event, idx) => {
+                    const Icon = TIMELINE_ICONS[event.type] || Circle;
+                    const colorClass = TIMELINE_COLORS[event.type] || 'text-muted-foreground bg-muted';
+                    return (
+                      <div key={event.id} className="relative flex gap-3 pl-0">
+                        <div className={`relative z-10 flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full ${colorClass}`}>
+                          <Icon className="h-3.5 w-3.5" />
+                        </div>
+                        <div className="flex-1 pt-1">
+                          <p className="text-sm font-medium text-card-foreground">{event.description}</p>
+                          <p className="text-[11px] text-muted-foreground">{formatTime(event.timestamp)}{event.actor ? ` • ${event.actor}` : ''}</p>
+                        </div>
                       </div>
-                      <div className="flex-1 pt-1">
-                        <p className="text-sm font-medium text-card-foreground">{event.description}</p>
-                        <p className="text-[11px] text-muted-foreground">{formatTime(event.timestamp)}{event.actor ? ` • ${event.actor}` : ''}</p>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Messages - Chat Style */}
           <div className="card-premium overflow-hidden">
@@ -296,17 +306,19 @@ const TicketDetail = () => {
           <div className="card-premium p-5">
             <h3 className="mb-3.5 font-heading text-sm font-semibold text-card-foreground">Details</h3>
             <div className="space-y-3.5">
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-muted"><Building className="h-3.5 w-3.5 text-muted-foreground" /></div>
-                <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Company</p><p className="text-sm text-card-foreground">{ticket.company}</p></div>
-              </div>
+              {ticket.company && (
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-muted"><Building className="h-3.5 w-3.5 text-muted-foreground" /></div>
+                  <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Company</p><p className="text-sm text-card-foreground">{ticket.company}</p></div>
+                </div>
+              )}
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-muted"><Factory className="h-3.5 w-3.5 text-muted-foreground" /></div>
                 <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Industry</p><p className="text-sm text-card-foreground">{ticket.industry || '—'}</p></div>
               </div>
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-muted"><MapPin className="h-3.5 w-3.5 text-muted-foreground" /></div>
-                <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Location</p><p className="text-sm text-card-foreground">{ticket.customerLocation || '—'}</p></div>
+                <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Location</p><p className="text-sm text-card-foreground">{ticket.location || '—'}</p></div>
               </div>
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-muted"><Clock className="h-3.5 w-3.5 text-muted-foreground" /></div>
@@ -322,15 +334,15 @@ const TicketDetail = () => {
               <div className="space-y-3.5">
                 <div className="flex items-start gap-3">
                   <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-muted"><User className="h-3.5 w-3.5 text-muted-foreground" /></div>
-                  <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Name</p><p className="text-sm text-card-foreground capitalize">{ticket.customerName}</p></div>
+                  <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Name</p><p className="text-sm text-card-foreground capitalize">{ticket.fullName}</p></div>
                 </div>
                 <div className="flex items-start gap-3">
                   <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-muted"><Mail className="h-3.5 w-3.5 text-muted-foreground" /></div>
-                  <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Email</p><p className="text-sm text-card-foreground">{ticket.customerEmail}</p></div>
+                  <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Email</p><p className="text-sm text-card-foreground">{ticket.email}</p></div>
                 </div>
                 <div className="flex items-start gap-3">
                   <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-muted"><Phone className="h-3.5 w-3.5 text-muted-foreground" /></div>
-                  <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Phone</p><p className="text-sm text-card-foreground">{ticket.customerPhone || '—'}</p></div>
+                  <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Phone</p><p className="text-sm text-card-foreground">{ticket.phone || '—'}</p></div>
                 </div>
               </div>
             </div>
@@ -344,7 +356,7 @@ const TicketDetail = () => {
               </h3>
               <div className="flex flex-wrap gap-1.5">
                 {ALL_TAGS.map(tag => {
-                  const active = ticket.tags.includes(tag);
+                  const active = (ticket.tags || []).includes(tag);
                   return (
                     <button
                       key={tag}
@@ -376,11 +388,11 @@ const TicketDetail = () => {
                     onChange={e => handleStatusChange(e.target.value as TicketStatus)}
                     className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm transition-colors focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
                   >
-                    {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                    {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
                   </select>
                 </div>
                 {!isClosed && (
-                  <button onClick={() => handleStatusChange('Resolved')} className="w-full rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-medium text-primary-foreground transition-all hover:opacity-90">
+                  <button onClick={() => handleStatusChange('resolved')} className="w-full rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-medium text-primary-foreground transition-all hover:opacity-90">
                     Mark Resolved
                   </button>
                 )}
