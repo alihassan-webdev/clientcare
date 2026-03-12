@@ -49,56 +49,66 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Sync users from Firestore on mount and when user changes
-  useEffect(() => {
-    const syncUsersFromFirestore = async () => {
-      try {
-        const db = getFirestore();
-        const usersCollection = collection(db, 'users');
+  // Helper function to sync from Firestore
+  const syncUsersFromFirestore = useCallback(async () => {
+    try {
+      const db = getFirestore();
+      const usersCollection = collection(db, 'users');
 
-        const snapshot = await getDocs(query(usersCollection));
-        const firestoreUsers: User[] = [];
+      const snapshot = await getDocs(query(usersCollection));
+      const firestoreUsers: User[] = [];
 
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          firestoreUsers.push({
-            id: data.uid || doc.id,
-            name: data.name || '',
-            email: data.email || '',
-            phone: data.phone || '',
-            company: data.company || '',
-            role: (data.role || 'customer') as UserRole,
-            registeredAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
-          });
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        firestoreUsers.push({
+          id: data.uid || doc.id,
+          name: data.name || '',
+          email: data.email || '',
+          phone: data.phone || '',
+          company: data.company || '',
+          role: (data.role || 'customer') as UserRole,
+          registeredAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
+        });
+      });
+
+      if (firestoreUsers.length > 0 || snapshot.size === 0) {
+        // Also keep protected accounts from localStorage
+        const storedUsers = localStorage.getItem('cc_users');
+        const localUsers = storedUsers ? JSON.parse(storedUsers) : [];
+        const protectedUsers = localUsers.filter((u: User) => u.isProtected);
+
+        // Merge: Firestore users + protected local users
+        const mergedUsers = [...firestoreUsers];
+        protectedUsers.forEach((protected_user: User) => {
+          if (!mergedUsers.find(u => u.id === protected_user.id)) {
+            mergedUsers.push(protected_user);
+          }
         });
 
-        if (firestoreUsers.length > 0) {
-          // Also keep protected accounts from localStorage
-          const storedUsers = localStorage.getItem('cc_users');
-          const localUsers = storedUsers ? JSON.parse(storedUsers) : [];
-          const protectedUsers = localUsers.filter((u: User) => u.isProtected);
-
-          // Merge: Firestore users + protected local users
-          const mergedUsers = [...firestoreUsers];
-          protectedUsers.forEach((protected_user: User) => {
-            if (!mergedUsers.find(u => u.id === protected_user.id)) {
-              mergedUsers.push(protected_user);
-            }
-          });
-
-          setUsers(mergedUsers);
-          localStorage.setItem('cc_users', JSON.stringify(mergedUsers));
-        }
-      } catch (error: any) {
-        console.debug('Firestore sync skipped:', error?.code || error?.message);
-        // Silently fail - will use localStorage data
-      } finally {
-        setUsersLoading(false);
+        setUsers(mergedUsers);
+        localStorage.setItem('cc_users', JSON.stringify(mergedUsers));
       }
-    };
-
-    syncUsersFromFirestore();
+    } catch (error: any) {
+      console.debug('Firestore sync skipped:', error?.code || error?.message);
+      // Silently fail - will use localStorage data
+    } finally {
+      setUsersLoading(false);
+    }
   }, []);
+
+  // Sync on mount
+  useEffect(() => {
+    syncUsersFromFirestore();
+  }, [syncUsersFromFirestore]);
+
+  // Periodic sync every 3 seconds to pick up Firestore changes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      syncUsersFromFirestore();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [syncUsersFromFirestore]);
 
   // Initialize localStorage with mock data if empty
   useEffect(() => {
@@ -225,6 +235,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return updated;
       });
 
+      // Sync from Firestore after a short delay to get latest data
+      setTimeout(() => {
+        setUsersLoading(true);
+        syncUsersFromFirestore();
+      }, 500);
+
       return newUser;
     } catch (error: any) {
       const errorMessage = error?.code === 'auth/email-already-in-use'
@@ -234,7 +250,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         : error?.message || 'Failed to add user';
       throw new Error(errorMessage);
     }
-  }, []);
+  }, [syncUsersFromFirestore]);
 
   const logout = useCallback(async () => {
     try {
@@ -308,7 +324,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return updated;
       });
     }
-  }, [user?.id, user?.role, logout, users]);
+
+    // Sync from Firestore after a short delay to get latest data
+    setTimeout(() => {
+      setUsersLoading(true);
+      syncUsersFromFirestore();
+    }, 500);
+  }, [user?.id, user?.role, logout, users, syncUsersFromFirestore]);
 
   const deleteUser = useCallback(async (id: string) => {
     try {
@@ -348,68 +370,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem('cc_users', JSON.stringify(updated));
         return updated;
       });
+
+      // Sync from Firestore after a short delay to confirm deletion
+      setTimeout(() => {
+        setUsersLoading(true);
+        syncUsersFromFirestore();
+      }, 500);
     } catch (error: any) {
       const errorMessage = error?.message || 'Failed to delete user';
       throw new Error(errorMessage);
     }
-  }, [user?.id, users, auth]);
+  }, [user?.id, users, auth, syncUsersFromFirestore]);
 
+  // Manual sync function (calls the same logic as periodic sync)
   const syncUsers = useCallback(() => {
-    try {
-      setUsersLoading(true);
-      const db = getFirestore();
-      const usersCollection = collection(db, 'users');
-
-      // Fetch latest from Firestore
-      getDocs(usersCollection).then(snapshot => {
-        const firestoreUsers: User[] = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          firestoreUsers.push({
-            id: data.uid || doc.id,
-            name: data.name || '',
-            email: data.email || '',
-            phone: data.phone || '',
-            company: data.company || '',
-            role: (data.role || 'customer') as UserRole,
-            registeredAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
-          });
-        });
-
-        if (firestoreUsers.length > 0) {
-          // Also preserve protected users from localStorage
-          const storedUsers = localStorage.getItem('cc_users');
-          const localUsers = storedUsers ? JSON.parse(storedUsers) : [];
-          const protectedUsers = localUsers.filter((u: User) => u.isProtected);
-
-          const mergedUsers = [...firestoreUsers];
-          protectedUsers.forEach((protected_user: User) => {
-            if (!mergedUsers.find(u => u.id === protected_user.id)) {
-              mergedUsers.push(protected_user);
-            }
-          });
-
-          setUsers(mergedUsers);
-          localStorage.setItem('cc_users', JSON.stringify(mergedUsers));
-        } else {
-          const storedUsers = localStorage.getItem('cc_users');
-          if (storedUsers) {
-            const loadedUsers = JSON.parse(storedUsers);
-            if (Array.isArray(loadedUsers)) {
-              setUsers(loadedUsers);
-            }
-          }
-        }
-        setUsersLoading(false);
-      }).catch(error => {
-        console.error('Error fetching users from Firestore:', error);
-        setUsersLoading(false);
-      });
-    } catch (error) {
-      console.error('Failed to sync users:', error);
-      setUsersLoading(false);
-    }
-  }, []);
+    setUsersLoading(true);
+    syncUsersFromFirestore();
+  }, [syncUsersFromFirestore]);
 
   return (
     <AuthContext.Provider value={{ user, role, isAuthenticated: !!user, isLoading, usersLoading, users, login, addUser, logout, updateProfile, updateUser, deleteUser, syncUsers }}>
