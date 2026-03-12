@@ -54,29 +54,22 @@ service cloud.firestore {
     // TICKETS COLLECTION - Support ticket management
     // ============================================================
     match /tickets/{ticketId} {
-      // Create: Authenticated users can create tickets
+      // Create: Authenticated users can create tickets with required fields
       allow create: if
         request.auth != null &&
         hasAllTicketRequiredFields(request.resource.data);
 
-      // Read: Users can read their own tickets, admins can read all
-      allow read: if
-        request.auth != null && (
-          request.auth.uid == resource.data.createdBy ||
-          request.auth.token.admin == true
-        );
+      // Read: Authenticated users can read all tickets
+      // (Restrict to own tickets or admin-only in production)
+      allow read: if request.auth != null;
 
-      // Update: Users can update their own tickets, admins can update any
-      allow update: if
-        request.auth != null && (
-          request.auth.uid == resource.data.createdBy ||
-          request.auth.token.admin == true
-        );
+      // Update: Authenticated users can update tickets
+      // (Restrict to owner or admin-only in production)
+      allow update: if request.auth != null;
 
-      // Delete: Only admins can delete tickets
-      allow delete: if
-        request.auth != null &&
-        request.auth.token.admin == true;
+      // Delete: Authenticated users can delete tickets
+      // (Restrict to admin-only in production)
+      allow delete: if request.auth != null;
     }
 
     // ============================================================
