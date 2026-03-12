@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Users, Pencil, Trash2, X, Save, Eye, EyeOff, Search, Plus, Lock, RotateCw } from 'lucide-react';
 
 const AdminSettings = () => {
-  const { users, updateUser, deleteUser, addUser, user: currentUser, syncUsers } = useAuth();
+  const { users, updateUser, deleteUser, addUser, user: currentUser, syncUsers, usersLoading } = useAuth();
   const [search, setSearch] = useState('');
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', company: '', password: '', role: 'customer' as const });
@@ -304,14 +304,15 @@ const AdminSettings = () => {
         <div className="border-b border-border px-5 py-3.5 flex items-center justify-between">
           <h3 className="flex items-center gap-2 font-heading text-sm font-semibold text-card-foreground">
             <Users className="h-4 w-4" /> All Users ({filteredUsers.length})
+            {usersLoading && <span className="text-xs text-muted-foreground">(Loading from database...)</span>}
           </h3>
           <button
             onClick={handleRefresh}
-            disabled={isRefreshing}
+            disabled={isRefreshing || usersLoading}
             className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             title="Refresh users list"
           >
-            <RotateCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <RotateCw className={`h-3.5 w-3.5 ${isRefreshing || usersLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>

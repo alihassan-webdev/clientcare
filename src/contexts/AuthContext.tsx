@@ -3,6 +3,7 @@ import { User, UserRole } from '@/types';
 import { mockUsers } from '@/data/mockData';
 import { auth } from '@/firebase';
 import { signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, deleteUser as firebaseDeleteUser } from 'firebase/auth';
+import { getFirestore, collection, onSnapshot, query, getDocs, setDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 
 interface AuthContextType {
   user: User | null;
@@ -17,6 +18,7 @@ interface AuthContextType {
   updateUser: (id: string, updates: Partial<User> & { password?: string }) => void;
   deleteUser: (id: string) => Promise<void>;
   syncUsers: () => void;
+  usersLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -31,6 +33,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [usersLoading, setUsersLoading] = useState(false);
   const [users, setUsers] = useState<User[]>(() => {
     const storedUsers = localStorage.getItem('cc_users');
     return storedUsers ? JSON.parse(storedUsers) : mockUsers;
@@ -44,6 +47,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(JSON.parse(storedUser));
       setRole(storedRole as UserRole);
     }
+  }, []);
+
+  // Helper function to sync from Firestore
+  const syncUsersFromFirestore = useCallback(async () => {
+    try {
+      const db = getFirestore();
+      const usersCollection = collection(db, 'users');
+
+      const snapshot = await getDocs(query(usersCollection));
+      const firestoreUsers: User[] = [];
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        firestoreUsers.push({
+          id: data.uid || doc.id,
+          name: data.name || '',
+          email: data.email || '',
+          phone: data.phone || '',
+          company: data.company || '',
+          role: (data.role || 'customer') as UserRole,
+          registeredAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
+        });
+      });
+
+      if (firestoreUsers.length > 0 || snapshot.size === 0) {
+        // Also keep protected accounts from localStorage
+        const storedUsers = localStorage.getItem('cc_users');
+        const localUsers = storedUsers ? JSON.parse(storedUsers) : [];
+        const protectedUsers = localUsers.filter((u: User) => u.isProtected);
+
+        // Merge: Firestore users + protected local users
+        const mergedUsers = [...firestoreUsers];
+        protectedUsers.forEach((protected_user: User) => {
+          if (!mergedUsers.find(u => u.id === protected_user.id)) {
+            mergedUsers.push(protected_user);
+          }
+        });
+
+        setUsers(mergedUsers);
+        localStorage.setItem('cc_users', JSON.stringify(mergedUsers));
+      }
+    } catch (error: any) {
+      console.debug('Firestore sync skipped:', error?.code || error?.message);
+      // Silently fail - will use localStorage data
+    } finally {
+      setUsersLoading(false);
+    }
+  }, []);
+
+  // Sync on mount only
+  useEffect(() => {
+    syncUsersFromFirestore();
   }, []);
 
   // Initialize localStorage with mock data if empty
@@ -136,19 +191,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const addUser = useCallback(async (name: string, email: string, phone: string, company: string, password: string, userRole: UserRole = 'customer') => {
     try {
-      // Create user in Firebase
+      // Create user in Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const uid = userCredential.user.uid;
+
+      // Also add to Firestore (Cloud Functions should handle this, but we do it as backup)
+      try {
+        const db = getFirestore();
+        await setDoc(doc(db, 'users', uid), {
+          uid,
+          name,
+          email,
+          phone,
+          company,
+          role: userRole,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          syncedWithAuth: true,
+        });
+      } catch (firestoreError) {
+        console.warn('Could not save to Firestore, relying on Cloud Functions:', firestoreError);
+      }
 
       const newUser: User = {
-        id: userCredential.user.uid,
+        id: uid,
         name, email, phone, role: userRole, company,
         password,
         registeredAt: new Date().toISOString(),
       };
+
       setUsers(prev => {
         const updated = [...prev, newUser];
+        localStorage.setItem('cc_users', JSON.stringify(updated));
         return updated;
       });
+
+      // Sync from Firestore after a short delay to get latest data
+      setTimeout(() => {
+        setUsersLoading(true);
+        syncUsersFromFirestore();
+      }, 500);
+
       return newUser;
     } catch (error: any) {
       const errorMessage = error?.code === 'auth/email-already-in-use'
@@ -158,7 +241,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         : error?.message || 'Failed to add user';
       throw new Error(errorMessage);
     }
-  }, []);
+  }, [syncUsersFromFirestore]);
 
   const logout = useCallback(async () => {
     try {
@@ -190,12 +273,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Cannot change the role of a protected account');
     }
 
+    // Prepare Firestore update (exclude fields that don't exist in Firestore schema)
+    const firestoreUpdate: any = {};
+    if (updates.name) firestoreUpdate.name = updates.name;
+    if (updates.email) firestoreUpdate.email = updates.email;
+    if (updates.phone) firestoreUpdate.phone = updates.phone;
+    if (updates.company) firestoreUpdate.company = updates.company;
+    if (updates.role) firestoreUpdate.role = updates.role;
+    firestoreUpdate.updatedAt = Date.now();
+
+    // Update Firestore
+    if (Object.keys(firestoreUpdate).length > 1) {
+      try {
+        const db = getFirestore();
+        updateDoc(doc(db, 'users', id), firestoreUpdate).catch(error => {
+          console.warn('Could not update user in Firestore:', error);
+        });
+      } catch (err) {
+        console.warn('Error getting Firestore instance:', err);
+      }
+    }
+
+    // Update local state
     setUsers(prev => {
       const updated = prev.map(u => u.id === id ? { ...u, ...updates } : u);
-      // Persist immediately to localStorage for seamless sync
       localStorage.setItem('cc_users', JSON.stringify(updated));
       return updated;
     });
+
     if (user?.id === id) {
       // If role is being changed for current user, logout after a short delay
       if (updates.role && updates.role !== user.role) {
@@ -210,7 +315,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return updated;
       });
     }
-  }, [user?.id, user?.role, logout, users]);
+
+    // Sync from Firestore after a short delay to get latest data
+    setTimeout(() => {
+      setUsersLoading(true);
+      syncUsersFromFirestore();
+    }, 500);
+  }, [user?.id, user?.role, logout, users, syncUsersFromFirestore]);
 
   const deleteUser = useCallback(async (id: string) => {
     try {
@@ -220,69 +331,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('This account is protected and cannot be deleted');
       }
 
-      // If deleting the current user
+      // Remove from Firestore first
+      try {
+        const db = getFirestore();
+        await deleteDoc(doc(db, 'users', id));
+        // Cloud Functions will handle deleting from Auth when Firestore doc is deleted
+      } catch (firestoreError) {
+        console.warn('Could not delete user from Firestore:', firestoreError);
+      }
+
+      // If deleting the current user from Firebase Auth
       if (user?.id === id && auth.currentUser) {
-        await firebaseDeleteUser(auth.currentUser);
+        try {
+          await firebaseDeleteUser(auth.currentUser);
+        } catch (authError) {
+          console.warn('Could not delete user from Firebase Auth:', authError);
+        }
         // Also logout
         localStorage.removeItem('cc_token');
         localStorage.removeItem('cc_role');
         localStorage.removeItem('cc_user');
         setUser(null);
         setRole(null);
-      } else {
-        // For other users, call Cloud Function to delete from Firebase
-        // This requires a backend Cloud Function with Admin SDK access
-        try {
-          await fetch('/api/deleteUser', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: id })
-          }).then(res => {
-            if (!res.ok) throw new Error('Failed to delete user from Firebase');
-            return res.json();
-          });
-        } catch (firebaseError) {
-          // Log the error but continue with local deletion
-          // This allows the app to work even without a backend Cloud Function
-          console.warn('Could not delete user from Firebase Auth:', firebaseError);
-        }
       }
 
-      // Remove from local database
+      // Remove from local state
       setUsers(prev => {
         const updated = prev.filter(u => u.id !== id);
+        localStorage.setItem('cc_users', JSON.stringify(updated));
         return updated;
       });
+
+      // Sync from Firestore after a short delay to confirm deletion
+      setTimeout(() => {
+        setUsersLoading(true);
+        syncUsersFromFirestore();
+      }, 500);
     } catch (error: any) {
       const errorMessage = error?.message || 'Failed to delete user';
       throw new Error(errorMessage);
     }
-  }, [user?.id, users]);
+  }, [user?.id, users, auth, syncUsersFromFirestore]);
 
+  // Manual sync function (calls the same logic as periodic sync)
   const syncUsers = useCallback(() => {
-    try {
-      const storedUsers = localStorage.getItem('cc_users');
-      if (storedUsers) {
-        const loadedUsers = JSON.parse(storedUsers);
-        if (Array.isArray(loadedUsers)) {
-          setUsers(loadedUsers);
-        } else {
-          console.error('Invalid users data format, falling back to mock data');
-          setUsers(mockUsers);
-        }
-      } else {
-        // If no users in storage, use mock data
-        setUsers(mockUsers);
-      }
-    } catch (error) {
-      console.error('Failed to sync users from storage:', error);
-      // On error, fallback to mock data
-      setUsers(mockUsers);
-    }
-  }, []);
+    setUsersLoading(true);
+    syncUsersFromFirestore();
+  }, [syncUsersFromFirestore]);
 
   return (
-    <AuthContext.Provider value={{ user, role, isAuthenticated: !!user, isLoading, users, login, addUser, logout, updateProfile, updateUser, deleteUser, syncUsers }}>
+    <AuthContext.Provider value={{ user, role, isAuthenticated: !!user, isLoading, usersLoading, users, login, addUser, logout, updateProfile, updateUser, deleteUser, syncUsers }}>
       {children}
     </AuthContext.Provider>
   );
