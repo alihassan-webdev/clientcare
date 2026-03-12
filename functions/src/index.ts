@@ -420,6 +420,91 @@ export const syncAllUsers = functions.https.onCall(
 );
 
 /**
+ * OPTIONAL: Secure Delete User Callable Function
+ * Called from admin panel to securely delete a user from both Auth and Firestore
+ * This ensures both systems stay synchronized
+ */
+export const deleteUserSecure = functions.https.onCall(
+  async (data, context) => {
+    // Check if caller is authenticated
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        'unauthenticated',
+        'User must be authenticated to delete users'
+      );
+    }
+
+    const userId = data.userId as string;
+
+    if (!userId) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'userId is required'
+      );
+    }
+
+    // Prevent self-deletion
+    if (userId === context.auth.uid) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'You cannot delete your own account'
+      );
+    }
+
+    const functionContext = {
+      functionName: 'deleteUserSecure',
+      userId,
+      callerId: context.auth.uid,
+      timestamp: Date.now(),
+    };
+
+    try {
+      logger.info('Secure user deletion initiated', functionContext);
+
+      // Check if user is protected
+      if (isProtectedUser(userId)) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'This account is protected and cannot be deleted'
+        );
+      }
+
+      // Delete from Firestore first
+      await deleteFirestoreUser(db, userId);
+      logger.info('Deleted user from Firestore', functionContext);
+
+      // Then delete from Auth
+      // This might already trigger the onAuthUserDeleted function, but we do it explicitly here
+      try {
+        await deleteAuthUser(auth, userId);
+        logger.info('Deleted user from Firebase Auth', functionContext);
+      } catch (authError) {
+        logger.warn('Auth user already deleted or does not exist', functionContext);
+      }
+
+      logger.info('User successfully deleted from both Firestore and Auth', functionContext);
+      return {
+        status: 'success',
+        message: 'User deleted successfully',
+        userId,
+      };
+    } catch (error) {
+      if (error instanceof functions.https.HttpsError) {
+        throw error;
+      }
+
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      logger.error('Error in deleteUserSecure', errorMessage, functionContext);
+      throw new functions.https.HttpsError(
+        'internal',
+        'Error deleting user'
+      );
+    }
+  }
+);
+
+/**
  * OPTIONAL: Get Sync Status Callable Function
  * Returns the sync status for a specific user
  */

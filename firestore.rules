@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions to check user roles
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+             exists(/databases/{database}/documents/users/$(request.auth.uid)) &&
+             get(/databases/{database}/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users collection - main data store for user synchronization
+    match /users/{userId} {
+      // Read: Admins can read all users, customers can only read their own profile
+      allow read: if isAdmin() || isOwner(userId);
+      
+      // Create: Only Cloud Functions (service account) and admins can create
+      // Cloud Functions use special authentication that bypasses these rules
+      allow create: if isAdmin() || 
+                       (isAuthenticated() && request.auth.token.admin == true);
+      
+      // Update: Only admins can update user records
+      // Also allow self-update of certain fields (name, phone, company)
+      allow update: if isAdmin() ||
+                       (isOwner(userId) && 
+                        // Allow users to update only specific fields
+                        request.resource.data.diff(resource.data).affectedKeys()
+                          .hasAll(['name', 'phone', 'company']) &&
+                        // Ensure users cannot change their own role
+                        request.resource.data.role == resource.data.role &&
+                        // Ensure users cannot change uid or email
+                        request.resource.data.uid == resource.data.uid &&
+                        request.resource.data.email == resource.data.email);
+      
+      // Delete: Only Cloud Functions (service account) and admins can delete
+      allow delete: if isAdmin() || 
+                       (isAuthenticated() && request.auth.token.admin == true);
+
+      // Firestore fields validation
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    // Sync metadata collection - internal use only
+    // Used by Cloud Functions to track sync operations and prevent infinite loops
+    match /syncMetadata/{userId} {
+      // Only Cloud Functions should access this collection
+      allow read, write: if isAuthenticated() && request.auth.token.admin == true;
+    }
+
+    // Tickets collection - for ticket management system
+    match /tickets/{document=**} {
+      // Admins and ticket owners can read
+      allow read: if isAdmin() || isOwner(resource.data.userId);
+      
+      // Admins and ticket creators can create
+      allow create: if isAdmin() || isAuthenticated();
+      
+      // Admins and ticket owners can update
+      allow update: if isAdmin() || isOwner(resource.data.userId);
+      
+      // Admins can delete
+      allow delete: if isAdmin();
+    }
+
+    // Default deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

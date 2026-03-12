@@ -1,9 +1,10 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { User, UserRole } from '@/types';
 import { mockUsers } from '@/data/mockData';
 import { auth } from '@/firebase';
 import { signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, deleteUser as firebaseDeleteUser } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, query, getDocs, setDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, query, getDocs, setDoc, doc, deleteDoc, updateDoc, Unsubscribe } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 interface AuthContextType {
   user: User | null;
@@ -38,6 +39,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const storedUsers = localStorage.getItem('cc_users');
     return storedUsers ? JSON.parse(storedUsers) : mockUsers;
   });
+  const unsubscribeRef = useRef<Unsubscribe | null>(null);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('cc_user');
@@ -49,57 +51,77 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Helper function to sync from Firestore
-  const syncUsersFromFirestore = useCallback(async () => {
+  // Helper function to set up real-time listener for Firestore users
+  const setupRealtimeListener = useCallback(() => {
     try {
       const db = getFirestore();
       const usersCollection = collection(db, 'users');
 
-      const snapshot = await getDocs(query(usersCollection));
-      const firestoreUsers: User[] = [];
+      // Set up real-time listener using onSnapshot
+      const unsubscribe = onSnapshot(
+        query(usersCollection),
+        (snapshot) => {
+          const firestoreUsers: User[] = [];
 
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        firestoreUsers.push({
-          id: data.uid || doc.id,
-          name: data.name || '',
-          email: data.email || '',
-          phone: data.phone || '',
-          company: data.company || '',
-          role: (data.role || 'customer') as UserRole,
-          registeredAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
-        });
-      });
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            firestoreUsers.push({
+              id: data.uid || doc.id,
+              name: data.name || '',
+              email: data.email || '',
+              phone: data.phone || '',
+              company: data.company || '',
+              role: (data.role || 'customer') as UserRole,
+              registeredAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
+            });
+          });
 
-      if (firestoreUsers.length > 0 || snapshot.size === 0) {
-        // Also keep protected accounts from localStorage
-        const storedUsers = localStorage.getItem('cc_users');
-        const localUsers = storedUsers ? JSON.parse(storedUsers) : [];
-        const protectedUsers = localUsers.filter((u: User) => u.isProtected);
+          // Also keep protected accounts from localStorage
+          const storedUsers = localStorage.getItem('cc_users');
+          const localUsers = storedUsers ? JSON.parse(storedUsers) : [];
+          const protectedUsers = localUsers.filter((u: User) => u.isProtected);
 
-        // Merge: Firestore users + protected local users
-        const mergedUsers = [...firestoreUsers];
-        protectedUsers.forEach((protected_user: User) => {
-          if (!mergedUsers.find(u => u.id === protected_user.id)) {
-            mergedUsers.push(protected_user);
-          }
-        });
+          // Merge: Firestore users + protected local users
+          const mergedUsers = [...firestoreUsers];
+          protectedUsers.forEach((protected_user: User) => {
+            if (!mergedUsers.find(u => u.id === protected_user.id)) {
+              mergedUsers.push(protected_user);
+            }
+          });
 
-        setUsers(mergedUsers);
-        localStorage.setItem('cc_users', JSON.stringify(mergedUsers));
-      }
+          setUsers(mergedUsers);
+          localStorage.setItem('cc_users', JSON.stringify(mergedUsers));
+          setUsersLoading(false);
+        },
+        (error) => {
+          console.debug('Firestore real-time listener error:', error?.code || error?.message);
+          setUsersLoading(false);
+          // Silently fail - will use localStorage data
+        }
+      );
+
+      unsubscribeRef.current = unsubscribe;
+      return unsubscribe;
     } catch (error: any) {
-      console.debug('Firestore sync skipped:', error?.code || error?.message);
-      // Silently fail - will use localStorage data
-    } finally {
+      console.debug('Failed to set up real-time listener:', error?.code || error?.message);
       setUsersLoading(false);
+      return null;
     }
   }, []);
 
-  // Sync on mount only
+  // Set up real-time listener on mount
   useEffect(() => {
-    syncUsersFromFirestore();
-  }, []);
+    setUsersLoading(true);
+    setupRealtimeListener();
+
+    // Cleanup listener on unmount
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    };
+  }, [setupRealtimeListener]);
 
   // Initialize localStorage with mock data if empty
   useEffect(() => {
@@ -109,7 +131,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Persist users to localStorage whenever they change
+  // Persist users to localStorage whenever they change (except when coming from real-time listener)
   useEffect(() => {
     localStorage.setItem('cc_users', JSON.stringify(users));
   }, [users]);
@@ -226,11 +248,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return updated;
       });
 
-      // Sync from Firestore after a short delay to get latest data
-      setTimeout(() => {
-        setUsersLoading(true);
-        syncUsersFromFirestore();
-      }, 500);
+      // Real-time listener will automatically sync the latest data from Firestore
 
       return newUser;
     } catch (error: any) {
@@ -241,7 +259,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         : error?.message || 'Failed to add user';
       throw new Error(errorMessage);
     }
-  }, [syncUsersFromFirestore]);
+  }, []);
 
   const logout = useCallback(async () => {
     try {
@@ -316,12 +334,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     }
 
-    // Sync from Firestore after a short delay to get latest data
-    setTimeout(() => {
-      setUsersLoading(true);
-      syncUsersFromFirestore();
-    }, 500);
-  }, [user?.id, user?.role, logout, users, syncUsersFromFirestore]);
+    // Real-time listener will automatically sync the latest data from Firestore
+  }, [user?.id, user?.role, logout, users]);
 
   const deleteUser = useCallback(async (id: string) => {
     try {
@@ -331,53 +345,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('This account is protected and cannot be deleted');
       }
 
-      // Remove from Firestore first
+      // Check if trying to delete current user
+      if (user?.id === id) {
+        throw new Error('You cannot delete your own account');
+      }
+
+      // Use secure Cloud Function to delete user
       try {
+        const functions = getFunctions();
+        const deleteUserSecure = httpsCallable(functions, 'deleteUserSecure');
+        await deleteUserSecure({ userId: id });
+      } catch (functionError: any) {
+        // If Cloud Function is not available, fall back to direct deletion
+        console.warn('Cloud Function delete failed, trying direct deletion:', functionError);
         const db = getFirestore();
         await deleteDoc(doc(db, 'users', id));
-        // Cloud Functions will handle deleting from Auth when Firestore doc is deleted
-      } catch (firestoreError) {
-        console.warn('Could not delete user from Firestore:', firestoreError);
       }
 
-      // If deleting the current user from Firebase Auth
-      if (user?.id === id && auth.currentUser) {
-        try {
-          await firebaseDeleteUser(auth.currentUser);
-        } catch (authError) {
-          console.warn('Could not delete user from Firebase Auth:', authError);
-        }
-        // Also logout
-        localStorage.removeItem('cc_token');
-        localStorage.removeItem('cc_role');
-        localStorage.removeItem('cc_user');
-        setUser(null);
-        setRole(null);
-      }
-
-      // Remove from local state
+      // Remove from local state immediately for faster UI feedback
       setUsers(prev => {
         const updated = prev.filter(u => u.id !== id);
         localStorage.setItem('cc_users', JSON.stringify(updated));
         return updated;
       });
-
-      // Sync from Firestore after a short delay to confirm deletion
-      setTimeout(() => {
-        setUsersLoading(true);
-        syncUsersFromFirestore();
-      }, 500);
     } catch (error: any) {
       const errorMessage = error?.message || 'Failed to delete user';
       throw new Error(errorMessage);
     }
-  }, [user?.id, users, auth, syncUsersFromFirestore]);
+  }, [user?.id, users]);
 
-  // Manual sync function (calls the same logic as periodic sync)
+  // Manual sync function - re-establishes the real-time listener if it was disconnected
   const syncUsers = useCallback(() => {
     setUsersLoading(true);
-    syncUsersFromFirestore();
-  }, [syncUsersFromFirestore]);
+    // If listener is not active, set it up again
+    if (!unsubscribeRef.current) {
+      setupRealtimeListener();
+    } else {
+      setUsersLoading(false);
+    }
+  }, [setupRealtimeListener]);
 
   return (
     <AuthContext.Provider value={{ user, role, isAuthenticated: !!user, isLoading, usersLoading, users, login, addUser, logout, updateProfile, updateUser, deleteUser, syncUsers }}>
