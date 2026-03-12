@@ -95,18 +95,19 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         attachment: data.attachment,
         messages: [],
         timeline: [
-          { 
-            id: `tl-${Date.now()}`, 
-            type: 'created', 
-            description: `Ticket created by ${data.fullName}`, 
-            timestamp: now 
+          {
+            id: `tl-${Date.now()}`,
+            type: 'created',
+            description: `Ticket created by ${data.fullName}`,
+            timestamp: now
           },
         ],
         tags: [],
       };
 
       const docRef = await addDoc(ticketsCollection, ticketData);
-      
+      console.log('Ticket created successfully:', docRef.id);
+
       // Update the document with the ticketId based on document ID
       const ticketId = `TCK-${docRef.id.substring(0, 8).toUpperCase()}`;
       await updateDoc(docRef, { ticketId });
@@ -120,8 +121,14 @@ export const TicketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       addActivityLog({ type: 'ticket_created', description: `Ticket ${ticketId} created`, actor: data.fullName });
       return newTicket;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       console.error('Error adding ticket:', error);
-      toast.error('Failed to create ticket');
+      console.error('Error details:', {
+        message: errorMessage,
+        timestamp: new Date().toISOString(),
+        code: (error as any)?.code,
+      });
+      toast.error('Failed to create ticket. Please check the console for details.');
       return null;
     }
   }, [db, addActivityLog]);

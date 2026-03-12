@@ -49,7 +49,36 @@ service cloud.firestore {
       // Only Cloud Functions can access
       allow read, write, delete: if request.auth == null;
     }
-    
+
+    // ============================================================
+    // TICKETS COLLECTION - Support ticket management
+    // ============================================================
+    match /tickets/{ticketId} {
+      // Create: Authenticated users can create tickets
+      allow create: if
+        request.auth != null &&
+        hasAllTicketRequiredFields(request.resource.data);
+
+      // Read: Users can read their own tickets, admins can read all
+      allow read: if
+        request.auth != null && (
+          request.auth.uid == resource.data.createdBy ||
+          request.auth.token.admin == true
+        );
+
+      // Update: Users can update their own tickets, admins can update any
+      allow update: if
+        request.auth != null && (
+          request.auth.uid == resource.data.createdBy ||
+          request.auth.token.admin == true
+        );
+
+      // Delete: Only admins can delete tickets
+      allow delete: if
+        request.auth != null &&
+        request.auth.token.admin == true;
+    }
+
     // ============================================================
     // DEFAULT - Block all other collections
     // ============================================================
@@ -61,7 +90,7 @@ service cloud.firestore {
   // ============================================================
   // HELPER FUNCTIONS
   // ============================================================
-  
+
   // Check if all required fields are present for user creation
   function hasAllRequiredFields(data) {
     let requiredFields = ['uid', 'email', 'name', 'role', 'status', 'createdAt', 'updatedAt'];
@@ -73,6 +102,17 @@ service cloud.firestore {
            data.status in ['active', 'disabled'] &&
            data.createdAt is number &&
            data.updatedAt is number;
+  }
+
+  // Check if all required fields are present for ticket creation
+  function hasAllTicketRequiredFields(data) {
+    let requiredFields = ['subject', 'description', 'priority', 'email', 'fullName'];
+    return data.keys().hasAll(requiredFields) &&
+           data.subject is string &&
+           data.description is string &&
+           data.priority in ['Low', 'Medium', 'High', 'Critical'] &&
+           data.email is string &&
+           data.fullName is string;
   }
   
   // Check if a user is allowed to update their own document
